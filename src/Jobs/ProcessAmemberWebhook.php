@@ -283,6 +283,15 @@ class ProcessAmemberWebhook implements ShouldQueue
      */
     protected function handleUserAfterInsert(): void
     {
+        // Skip if user creation is disabled
+        if (!config('amember-sso.user_creation.enabled', false)) {
+            Log::info('User creation webhook skipped (user_creation.enabled = false)', [
+                'email' => $this->payload['user']['email'] ?? null,
+                'installation' => $this->installation->name,
+            ]);
+            return;
+        }
+
         DB::beginTransaction();
 
         try {
@@ -309,6 +318,15 @@ class ProcessAmemberWebhook implements ShouldQueue
      */
     protected function handleUserAfterUpdate(): void
     {
+        // Skip if user creation is disabled
+        if (!config('amember-sso.user_creation.enabled', false)) {
+            Log::info('User update webhook skipped (user_creation.enabled = false)', [
+                'email' => $this->payload['user']['email'] ?? null,
+                'installation' => $this->installation->name,
+            ]);
+            return;
+        }
+
         DB::beginTransaction();
 
         try {
