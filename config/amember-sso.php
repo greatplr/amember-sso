@@ -6,11 +6,11 @@ return [
     | aMember API Configuration
     |--------------------------------------------------------------------------
     |
-    | Configure your aMember Pro installation URL and API credentials.
+    | This package uses plutuss/amember-pro-laravel for API communication.
+    | Configure AMEMBER_URL and AMEMBER_API_KEY in your .env file.
+    | See: config/amember.php
     |
     */
-    'api_url' => env('AMEMBER_API_URL'),
-    'api_key' => env('AMEMBER_API_KEY'),
 
     /*
     |--------------------------------------------------------------------------

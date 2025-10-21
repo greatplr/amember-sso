@@ -22,8 +22,6 @@ class AmemberSsoServiceProvider extends ServiceProvider
 
         $this->app->singleton(AmemberSsoService::class, function ($app) {
             return new AmemberSsoService(
-                config('amember-sso.api_url'),
-                config('amember-sso.api_key'),
                 config('amember-sso.sso.secret_key')
             );
         });

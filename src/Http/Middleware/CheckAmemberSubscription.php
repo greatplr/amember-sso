@@ -28,15 +28,15 @@ class CheckAmemberSubscription
             return $this->unauthorized($request, 'User not authenticated');
         }
 
-        // Get the user's aMember ID
-        $amemberUserId = $user->amember_user_id ?? null;
+        // Get the user's email or login for check-access API
+        $loginOrEmail = $user->email ?? $user->login ?? null;
 
-        if (!$amemberUserId) {
-            return $this->unauthorized($request, 'User not linked to aMember account');
+        if (!$loginOrEmail) {
+            return $this->unauthorized($request, 'User email/login not found');
         }
 
-        // Check if user has any active subscription
-        $hasActiveSubscription = $this->amemberSso->hasActiveSubscription($amemberUserId);
+        // Check if user has any active subscription using check-access API
+        $hasActiveSubscription = $this->amemberSso->hasActiveSubscription($loginOrEmail, true);
 
         if (!$hasActiveSubscription) {
             return $this->unauthorized($request, 'Access denied. No active subscription found.');

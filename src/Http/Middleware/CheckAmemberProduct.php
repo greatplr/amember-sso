@@ -29,18 +29,18 @@ class CheckAmemberProduct
             return $this->unauthorized($request, 'User not authenticated');
         }
 
-        // Get the user's aMember ID
-        $amemberUserId = $user->amember_user_id ?? null;
+        // Get the user's email or login for check-access API
+        $loginOrEmail = $user->email ?? $user->login ?? null;
 
-        if (!$amemberUserId) {
-            return $this->unauthorized($request, 'User not linked to aMember account');
+        if (!$loginOrEmail) {
+            return $this->unauthorized($request, 'User email/login not found');
         }
 
         // Convert product IDs to integers
         $productIds = array_map('intval', $productIds);
 
-        // Check if user has access to any of the specified products
-        $hasAccess = $this->amemberSso->hasProductAccess($amemberUserId, $productIds);
+        // Check if user has access to any of the specified products using check-access API
+        $hasAccess = $this->amemberSso->hasProductAccess($loginOrEmail, $productIds, true);
 
         if (!$hasAccess) {
             return $this->unauthorized(

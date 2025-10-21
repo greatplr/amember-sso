@@ -66,10 +66,8 @@ class WebhookController extends Controller
     {
         $subscription = $this->upsertSubscription($data);
 
-        // Clear user's subscription cache
-        if (isset($data['user_id'])) {
-            $this->amemberSso->clearSubscriptionCache($data['user_id']);
-        }
+        // Clear user's access cache
+        $this->clearUserCache($data);
 
         event(new SubscriptionAdded($subscription, $data));
     }
@@ -81,10 +79,8 @@ class WebhookController extends Controller
     {
         $subscription = $this->upsertSubscription($data);
 
-        // Clear user's subscription cache
-        if (isset($data['user_id'])) {
-            $this->amemberSso->clearSubscriptionCache($data['user_id']);
-        }
+        // Clear user's access cache
+        $this->clearUserCache($data);
 
         event(new SubscriptionUpdated($subscription, $data));
     }
@@ -103,10 +99,8 @@ class WebhookController extends Controller
                 ->delete();
         }
 
-        // Clear user's subscription cache
-        if (isset($data['user_id'])) {
-            $this->amemberSso->clearSubscriptionCache($data['user_id']);
-        }
+        // Clear user's access cache
+        $this->clearUserCache($data);
 
         event(new SubscriptionDeleted($data));
     }
@@ -119,10 +113,8 @@ class WebhookController extends Controller
         // You can extend this to store payment records if needed
         Log::info('Payment completed', $data);
 
-        // Clear user's subscription cache as new payment might affect subscriptions
-        if (isset($data['user_id'])) {
-            $this->amemberSso->clearSubscriptionCache($data['user_id']);
-        }
+        // Clear user's access cache as new payment might affect subscriptions
+        $this->clearUserCache($data);
     }
 
     /**
@@ -133,9 +125,25 @@ class WebhookController extends Controller
         // You can extend this to update subscription status
         Log::info('Payment refunded', $data);
 
-        // Clear user's subscription cache
-        if (isset($data['user_id'])) {
-            $this->amemberSso->clearSubscriptionCache($data['user_id']);
+        // Clear user's access cache
+        $this->clearUserCache($data);
+    }
+
+    /**
+     * Clear user's access cache from webhook data.
+     */
+    protected function clearUserCache(array $data): void
+    {
+        // Try to get login or email from webhook data
+        $login = $data['login'] ?? null;
+        $email = $data['email'] ?? null;
+
+        if ($login) {
+            $this->amemberSso->clearAccessCache($login);
+        }
+
+        if ($email && $email !== $login) {
+            $this->amemberSso->clearAccessCache($email);
         }
     }
 
