@@ -60,6 +60,7 @@ return [
     |--------------------------------------------------------------------------
     |
     | Configure webhook handling for subscription updates from aMember.
+    | aMember uses camelCase event names (e.g., subscriptionAdded, not subscription.added)
     |
     */
     'webhook' => [
@@ -67,13 +68,17 @@ return [
         'secret' => env('AMEMBER_WEBHOOK_SECRET'),
         'route_prefix' => env('AMEMBER_WEBHOOK_PREFIX', 'amember/webhook'),
 
-        // Events to listen for
+        // Events to listen for (aMember uses camelCase event names)
         'events' => [
-            'subscription.added',
-            'subscription.updated',
-            'subscription.deleted',
-            'payment.completed',
-            'payment.refunded',
+            'subscriptionAdded',       // User gets new product subscription
+            'subscriptionDeleted',     // User subscription expires
+            'accessAfterInsert',       // Access record created (MAIN event for subscriptions)
+            'accessAfterUpdate',       // Access record updated
+            'accessAfterDelete',       // Access record deleted
+            'paymentAfterInsert',      // Payment inserted (not for free)
+            'invoicePaymentRefund',    // Payment refunded or chargebacked
+            'userAfterInsert',         // New user created
+            'userAfterUpdate',         // User record updated
         ],
     ],
 

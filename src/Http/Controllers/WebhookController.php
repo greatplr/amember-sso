@@ -42,18 +42,27 @@ class WebhookController extends Controller
                 return response()->json(['error' => 'Invalid signature'], 403);
             }
 
-            $eventType = $request->input('event');
-            $data = $request->input('data', []);
+            // aMember sends event type as 'am-event' in camelCase
+            $eventType = $request->input('am-event');
+
+            if (!$eventType) {
+                $this->logWebhook($request, 'failed', 'No am-event field');
+                return response()->json(['error' => 'Missing event type'], 400);
+            }
 
             $this->logWebhook($request, 'received', "Event: {$eventType} from {$installation->name}");
 
-            // Process the webhook based on event type
+            // Process the webhook based on event type (aMember uses camelCase)
             match ($eventType) {
-                'subscription.added' => $this->handleSubscriptionAdded($data, $installation),
-                'subscription.updated' => $this->handleSubscriptionUpdated($data, $installation),
-                'subscription.deleted' => $this->handleSubscriptionDeleted($data, $installation),
-                'payment.completed' => $this->handlePaymentCompleted($data, $installation),
-                'payment.refunded' => $this->handlePaymentRefunded($data, $installation),
+                'subscriptionAdded' => $this->handleSubscriptionAdded($request, $installation),
+                'subscriptionDeleted' => $this->handleSubscriptionDeleted($request, $installation),
+                'accessAfterInsert' => $this->handleAccessAfterInsert($request, $installation),
+                'accessAfterUpdate' => $this->handleAccessAfterUpdate($request, $installation),
+                'accessAfterDelete' => $this->handleAccessAfterDelete($request, $installation),
+                'paymentAfterInsert' => $this->handlePaymentAfterInsert($request, $installation),
+                'invoicePaymentRefund' => $this->handleInvoicePaymentRefund($request, $installation),
+                'userAfterInsert' => $this->handleUserAfterInsert($request, $installation),
+                'userAfterUpdate' => $this->handleUserAfterUpdate($request, $installation),
                 default => $this->logWebhook($request, 'ignored', "Unknown event type: {$eventType}"),
             };
 
@@ -71,30 +80,37 @@ class WebhookController extends Controller
     }
 
     /**
-     * Handle subscription added event.
+     * Handle subscriptionAdded event (user gets new product).
+     * Payload: user[], product[]
      */
-    protected function handleSubscriptionAdded(array $data, AmemberInstallation $installation): void
+    protected function handleSubscriptionAdded(Request $request, AmemberInstallation $installation): void
     {
         DB::beginTransaction();
 
         try {
+            $userData = $request->input('user', []);
+            $productData = $request->input('product', []);
+
             // Find or create user
-            $user = $this->findOrCreateUser($data, $installation);
+            $user = $this->findOrCreateUser($userData, $installation);
 
-            // Create subscription
-            $subscription = $this->upsertSubscription($data, $installation, $user);
+            // Note: subscriptionAdded doesn't include access record details
+            // We'll rely on accessAfterInsert for actual subscription creation
+            // This event just confirms user got the product
 
-            // Clear user's access cache
-            $this->clearUserCache($data);
+            $this->clearUserCache($userData);
 
             DB::commit();
 
-            event(new SubscriptionAdded($subscription, $data));
+            event(new SubscriptionAdded([
+                'user' => $userData,
+                'product' => $productData,
+            ], $request->all()));
 
             Log::info('Subscription added via webhook', [
                 'user_id' => $user->id,
                 'installation' => $installation->name,
-                'product_id' => $data['product_id'] ?? null,
+                'product_id' => $productData['product_id'] ?? null,
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -103,25 +119,65 @@ class WebhookController extends Controller
     }
 
     /**
-     * Handle subscription updated event.
+     * Handle subscriptionDeleted event (subscription expired).
+     * Payload: user[], product[]
      */
-    protected function handleSubscriptionUpdated(array $data, AmemberInstallation $installation): void
+    protected function handleSubscriptionDeleted(Request $request, AmemberInstallation $installation): void
+    {
+        $userData = $request->input('user', []);
+        $productData = $request->input('product', []);
+
+        // Delete all subscriptions for this user/product/installation combination
+        $tableName = config('amember-sso.tables.subscriptions');
+
+        DB::table($tableName)
+            ->where('user_id', $userData['user_id'] ?? null)
+            ->where('product_id', $productData['product_id'] ?? null)
+            ->where('installation_id', $installation->id)
+            ->delete();
+
+        $this->clearUserCache($userData);
+
+        event(new SubscriptionDeleted($request->all()));
+
+        Log::info('Subscription deleted via webhook', [
+            'user_id' => $userData['user_id'] ?? null,
+            'product_id' => $productData['product_id'] ?? null,
+            'installation' => $installation->name,
+        ]);
+    }
+
+    /**
+     * Handle accessAfterInsert event (actual access record created).
+     * Payload: access[], user[]
+     * This is the MAIN event for creating subscriptions.
+     */
+    protected function handleAccessAfterInsert(Request $request, AmemberInstallation $installation): void
     {
         DB::beginTransaction();
 
         try {
-            // Find or create user (in case webhook order is mixed up)
-            $user = $this->findOrCreateUser($data, $installation);
+            $accessData = $request->input('access', []);
+            $userData = $request->input('user', []);
 
-            // Update subscription
-            $subscription = $this->upsertSubscription($data, $installation, $user);
+            // Find or create user
+            $user = $this->findOrCreateUser($userData, $installation);
 
-            // Clear user's access cache
-            $this->clearUserCache($data);
+            // Create subscription from access record
+            $subscription = $this->upsertSubscriptionFromAccess($accessData, $installation, $user);
+
+            $this->clearUserCache($userData);
 
             DB::commit();
 
-            event(new SubscriptionUpdated($subscription, $data));
+            event(new SubscriptionAdded($subscription, $request->all()));
+
+            Log::info('Access record created via webhook', [
+                'user_id' => $user->id,
+                'access_id' => $accessData['access_id'] ?? null,
+                'product_id' => $accessData['product_id'] ?? null,
+                'installation' => $installation->name,
+            ]);
         } catch (\Exception $e) {
             DB::rollBack();
             throw $e;
@@ -129,52 +185,178 @@ class WebhookController extends Controller
     }
 
     /**
-     * Handle subscription deleted event.
+     * Handle accessAfterUpdate event.
+     * Payload: access[], old[], user[]
      */
-    protected function handleSubscriptionDeleted(array $data, AmemberInstallation $installation): void
+    protected function handleAccessAfterUpdate(Request $request, AmemberInstallation $installation): void
     {
-        $tableName = config('amember-sso.tables.subscriptions');
-        $accessId = $data['access_id'] ?? null;
+        DB::beginTransaction();
 
-        if ($accessId) {
-            DB::table($tableName)
-                ->where('access_id', $accessId)
-                ->where('installation_id', $installation->id)
-                ->delete();
+        try {
+            $accessData = $request->input('access', []);
+            $userData = $request->input('user', []);
+
+            $user = $this->findOrCreateUser($userData, $installation);
+            $subscription = $this->upsertSubscriptionFromAccess($accessData, $installation, $user);
+
+            $this->clearUserCache($userData);
+
+            DB::commit();
+
+            event(new SubscriptionUpdated($subscription, $request->all()));
+        } catch (\Exception $e) {
+            DB::rollBack();
+            throw $e;
+        }
+    }
+
+    /**
+     * Handle accessAfterDelete event.
+     * Payload: access[], user[]
+     */
+    protected function handleAccessAfterDelete(Request $request, AmemberInstallation $installation): void
+    {
+        $accessData = $request->input('access', []);
+        $userData = $request->input('user', []);
+        $tableName = config('amember-sso.tables.subscriptions');
+
+        DB::table($tableName)
+            ->where('access_id', $accessData['access_id'] ?? null)
+            ->where('installation_id', $installation->id)
+            ->delete();
+
+        $this->clearUserCache($userData);
+
+        event(new SubscriptionDeleted($request->all()));
+    }
+
+    /**
+     * Handle paymentAfterInsert event.
+     * Payload: invoice[], payment[], user[], items[]
+     */
+    protected function handlePaymentAfterInsert(Request $request, AmemberInstallation $installation): void
+    {
+        $paymentData = $request->input('payment', []);
+        $userData = $request->input('user', []);
+
+        Log::info('Payment received via webhook', [
+            'installation' => $installation->name,
+            'payment_id' => $paymentData['payment_id'] ?? null,
+            'amount' => $paymentData['amount'] ?? null,
+            'user_id' => $userData['user_id'] ?? null,
+        ]);
+
+        $this->clearUserCache($userData);
+    }
+
+    /**
+     * Handle invoicePaymentRefund event.
+     * Payload: invoice[], refund[], user[]
+     */
+    protected function handleInvoicePaymentRefund(Request $request, AmemberInstallation $installation): void
+    {
+        $refundData = $request->input('refund', []);
+        $userData = $request->input('user', []);
+
+        Log::info('Payment refunded via webhook', [
+            'installation' => $installation->name,
+            'refund' => $refundData,
+            'user_id' => $userData['user_id'] ?? null,
+        ]);
+
+        $this->clearUserCache($userData);
+    }
+
+    /**
+     * Handle userAfterInsert event.
+     * Payload: user[]
+     */
+    protected function handleUserAfterInsert(Request $request, AmemberInstallation $installation): void
+    {
+        DB::beginTransaction();
+
+        try {
+            $userData = $request->input('user', []);
+            $user = $this->findOrCreateUser($userData, $installation);
+
+            DB::commit();
+
+            Log::info('User created via webhook', [
+                'user_id' => $user->id,
+                'email' => $userData['email'] ?? null,
+                'installation' => $installation->name,
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            throw $e;
+        }
+    }
+
+    /**
+     * Handle userAfterUpdate event.
+     * Payload: user[], oldUser[]
+     */
+    protected function handleUserAfterUpdate(Request $request, AmemberInstallation $installation): void
+    {
+        DB::beginTransaction();
+
+        try {
+            $userData = $request->input('user', []);
+
+            // Update existing user if found
+            $userModel = config('amember-sso.user_model');
+            $user = $userModel::where('amember_user_id', $userData['user_id'] ?? null)
+                ->where('amember_installation_id', $installation->id)
+                ->first();
+
+            if ($user && config('amember-sso.access_control.sync_user_data')) {
+                $this->syncUserDataFromWebhook($user, $userData);
+            }
+
+            $this->clearUserCache($userData);
+
+            DB::commit();
+        } catch (\Exception $e) {
+            DB::rollBack();
+            throw $e;
+        }
+    }
+
+    /**
+     * Sync user data from webhook to local user model.
+     */
+    protected function syncUserDataFromWebhook(object $user, array $userData): void
+    {
+        $syncableFields = config('amember-sso.access_control.syncable_fields', []);
+        $changed = false;
+
+        foreach ($syncableFields as $field) {
+            if (isset($userData[$field]) && $user->{$field} !== $userData[$field]) {
+                $user->{$field} = $userData[$field];
+                $changed = true;
+            }
         }
 
-        // Clear user's access cache
-        $this->clearUserCache($data);
+        // Handle name fields specially (name_f, name_l -> name)
+        if (in_array('name_f', $syncableFields) || in_array('name_l', $syncableFields)) {
+            $nameF = $userData['name_f'] ?? '';
+            $nameL = $userData['name_l'] ?? '';
+            $fullName = trim($nameF . ' ' . $nameL);
 
-        event(new SubscriptionDeleted($data));
-    }
+            if ($fullName && $user->name !== $fullName) {
+                $user->name = $fullName;
+                $changed = true;
+            }
+        }
 
-    /**
-     * Handle payment completed event.
-     */
-    protected function handlePaymentCompleted(array $data, AmemberInstallation $installation): void
-    {
-        Log::info('Payment completed', [
-            'installation' => $installation->name,
-            'data' => $data,
-        ]);
+        if ($changed) {
+            $user->save();
 
-        // Clear user's access cache as new payment might affect subscriptions
-        $this->clearUserCache($data);
-    }
-
-    /**
-     * Handle payment refunded event.
-     */
-    protected function handlePaymentRefunded(array $data, AmemberInstallation $installation): void
-    {
-        Log::info('Payment refunded', [
-            'installation' => $installation->name,
-            'data' => $data,
-        ]);
-
-        // Clear user's access cache
-        $this->clearUserCache($data);
+            Log::info('User data synced from webhook', [
+                'user_id' => $user->id,
+                'amember_user_id' => $userData['user_id'] ?? null,
+            ]);
+        }
     }
 
     /**
@@ -275,21 +457,21 @@ class WebhookController extends Controller
     }
 
     /**
-     * Upsert subscription record.
+     * Upsert subscription from access record data.
      */
-    protected function upsertSubscription(array $data, AmemberInstallation $installation, object $user): array
+    protected function upsertSubscriptionFromAccess(array $accessData, AmemberInstallation $installation, object $user): array
     {
         $tableName = config('amember-sso.tables.subscriptions');
 
         $subscriptionData = [
             'installation_id' => $installation->id,
-            'access_id' => $data['access_id'] ?? null,
-            'user_id' => $user->amember_user_id ?? $data['user_id'] ?? null,
-            'product_id' => $data['product_id'] ?? null,
-            'begin_date' => $data['begin_date'] ?? null,
-            'expire_date' => $data['expire_date'] ?? null,
-            'status' => $this->determineStatus($data),
-            'data' => json_encode($data),
+            'access_id' => $accessData['access_id'] ?? null,
+            'user_id' => $accessData['user_id'] ?? $user->amember_user_id,
+            'product_id' => $accessData['product_id'] ?? null,
+            'begin_date' => $accessData['begin_date'] ?? null,
+            'expire_date' => $accessData['expire_date'] ?? null,
+            'status' => $this->determineStatus($accessData),
+            'data' => json_encode($accessData),
             'updated_at' => now(),
         ];
 
@@ -302,6 +484,14 @@ class WebhookController extends Controller
         );
 
         return $subscriptionData;
+    }
+
+    /**
+     * Upsert subscription record (legacy method for backward compatibility).
+     */
+    protected function upsertSubscription(array $data, AmemberInstallation $installation, object $user): array
+    {
+        return $this->upsertSubscriptionFromAccess($data, $installation, $user);
     }
 
     /**
@@ -353,7 +543,7 @@ class WebhookController extends Controller
         $tableName = config('amember-sso.tables.webhook_logs');
 
         DB::table($tableName)->insert([
-            'event_type' => $request->input('event'),
+            'event_type' => $request->input('am-event'),
             'status' => $status,
             'payload' => $request->getContent(),
             'message' => $message,
