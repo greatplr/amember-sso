@@ -13,7 +13,7 @@ return new class extends Migration
     {
         $tableName = config('amember-sso.tables.subscriptions', 'amember_subscriptions');
 
-        Schema::table($tableName, function (Blueprint $table) {
+        Schema::table($tableName, function (Blueprint $table) use ($tableName) {
             if (!Schema::hasColumn($tableName, 'installation_id')) {
                 $table->foreignId('installation_id')
                     ->nullable()
