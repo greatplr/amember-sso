@@ -110,9 +110,23 @@ return [
     |
     */
     'tables' => [
+        'installations' => 'amember_installations',
         'subscriptions' => 'amember_subscriptions',
         'products' => 'amember_products',
         'webhook_logs' => 'amember_webhook_logs',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Models
+    |--------------------------------------------------------------------------
+    |
+    | Customize the model classes used by the package.
+    |
+    */
+    'models' => [
+        'installation' => \Greatplr\AmemberSso\Models\AmemberInstallation::class,
+        'subscription' => \Greatplr\AmemberSso\Models\AmemberSubscription::class,
     ],
 
     /*
