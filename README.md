@@ -6,12 +6,14 @@ A comprehensive Laravel package that wraps `plutuss/amember-pro-laravel` to prov
 
 - **SSO Authentication**: Seamless single sign-on integration with aMember Pro
 - **Multi-Installation Support**: Manage multiple aMember installations from a single Laravel app
+- **Product Mapping System**: Map aMember products to application tiers, features, and specific models (polymorphic)
 - **Webhook Handling**: Automatic processing of subscription updates with queue support (Horizon/Redis)
 - **Access Control Middleware**: Protect routes based on product access and subscription status
 - **Subscription Management**: Track and manage user subscriptions locally
 - **IP-Based Installation Detection**: Automatically detect which aMember installation sent webhooks
 - **Configurable Caching**: Improve performance with intelligent caching of subscription data
-- **Event System**: Listen to subscription events in your application
+- **Event System**: Comprehensive events for subscriptions, users, and payments
+- **Testing Helpers**: Built-in tools for faking webhooks and events in tests
 - **Comprehensive Logging**: Database and debug logging for all webhook activity
 - **Queue Processing**: Background webhook processing with retry logic
 - **Laravel Auto-Discovery**: Automatic service provider registration
@@ -256,6 +258,10 @@ You can listen to subscription events in your application:
 use Greatplr\AmemberSso\Events\SubscriptionAdded;
 use Greatplr\AmemberSso\Events\SubscriptionUpdated;
 use Greatplr\AmemberSso\Events\SubscriptionDeleted;
+use Greatplr\AmemberSso\Events\UserCreated;
+use Greatplr\AmemberSso\Events\UserUpdated;
+use Greatplr\AmemberSso\Events\PaymentReceived;
+use Greatplr\AmemberSso\Events\PaymentRefunded;
 
 protected $listen = [
     SubscriptionAdded::class => [
@@ -266,6 +272,18 @@ protected $listen = [
     ],
     SubscriptionDeleted::class => [
         \App\Listeners\HandleSubscriptionDeletion::class,
+    ],
+    UserCreated::class => [
+        \App\Listeners\HandleUserCreated::class,
+    ],
+    UserUpdated::class => [
+        \App\Listeners\HandleUserUpdated::class,
+    ],
+    PaymentReceived::class => [
+        \App\Listeners\HandlePaymentReceived::class,
+    ],
+    PaymentRefunded::class => [
+        \App\Listeners\HandlePaymentRefunded::class,
     ],
 ];
 ```
@@ -283,6 +301,18 @@ class HandleNewSubscription
     {
         $subscription = $event->subscription;
         $rawData = $event->rawData;
+        $productMapping = $event->productMapping;  // AmemberProduct model (nullable)
+
+        // Access product tier, features, or polymorphic mapping
+        if ($productMapping) {
+            \Log::info('Product tier: ' . $productMapping->tier);
+
+            // If polymorphic mapping exists
+            if ($productMapping->mappable_type) {
+                $model = $productMapping->mappable;  // Get the actual model
+                \Log::info("User gained access to: {$model->title}");
+            }
+        }
 
         // Send welcome email, grant access, etc.
         \Log::info('New subscription added', [
@@ -325,6 +355,76 @@ AmemberInstallation::create([
 ```
 
 All webhooks automatically include installation context - no additional configuration needed!
+
+### Product Mapping
+
+Map aMember product IDs to application-specific tiers, features, and resources (polymorphic).
+
+**See [PRODUCT_MAPPING.md](PRODUCT_MAPPING.md) for complete guide.**
+
+#### Quick Overview
+
+The package supports two product mapping patterns:
+
+**1. Tier-Based Mapping** (Simple subscription tiers)
+```php
+use Greatplr\AmemberSso\Models\AmemberProduct;
+use Greatplr\AmemberSso\Facades\AmemberSso;
+
+// Map aMember Product 5 to 'premium' tier
+AmemberProduct::create([
+    'installation_id' => $installation->id,
+    'product_id' => '5',
+    'tier' => 'premium',
+    'display_name' => 'Premium Plan',
+    'features' => [
+        'can_use_api' => true,
+        'max_users' => 10,
+        'support_level' => 'priority',
+    ],
+    'price' => 29.99,
+    'currency' => 'USD',
+]);
+
+// Check tier access
+if (AmemberSso::hasTierAccess($amemberUserId, 'premium')) {
+    // User has premium access
+}
+
+// Check feature access
+if (AmemberSso::hasFeatureAccess($amemberUserId, 'can_use_api')) {
+    // User can use API
+}
+```
+
+**2. Polymorphic Mapping** (Specific resource access)
+```php
+// Map aMember Product 5 to Course #42
+AmemberProduct::create([
+    'installation_id' => $installation->id,
+    'product_id' => '5',
+    'mappable_type' => 'App\Models\Course',
+    'mappable_id' => 42,
+    'tier' => 'premium',  // Can combine with tier
+    'display_name' => 'Premium Course Bundle',
+]);
+
+// Check access to specific course
+if (AmemberSso::hasMappableAccess($amemberUserId, 'App\Models\Course', 42)) {
+    // User can access Course #42
+}
+
+// Get all courses user has access to
+$courses = AmemberSso::getUserMappables($amemberUserId, 'App\Models\Course');
+```
+
+**Use Cases:**
+- **Tier-based**: Simple subscription plans (Basic, Premium, Enterprise)
+- **Polymorphic**: Complex apps where products grant access to specific resources (Course + Ebook + Membership)
+
+**Multi-Resource Access**: One aMember product can map to multiple resources by creating multiple `AmemberProduct` records with the same `product_id` but different `mappable_type` and `mappable_id`.
+
+See [PRODUCT_MAPPING.md](PRODUCT_MAPPING.md) for middleware, events, testing, and complete examples.
 
 ### Direct API Access
 
@@ -399,13 +499,24 @@ Stores user subscription data:
 - `timestamps`
 
 ### amember_products
-Stores product information:
+Stores product mapping information:
 - `id`: Primary key
-- `product_id`: aMember product ID (unique)
-- `title`: Product title
-- `description`: Product description
-- `data`: JSON data from aMember
+- `installation_id`: Foreign key to amember_installations
+- `product_id`: aMember product ID
+- `title`: Product title (synced from aMember)
+- `description`: Product description (synced from aMember)
+- `tier`: Application tier (e.g., 'basic', 'premium', 'enterprise')
+- `display_name`: Display name for UI
+- `slug`: URL-friendly identifier
+- `mappable_type`: Polymorphic model class (e.g., 'App\Models\Course')
+- `mappable_id`: Polymorphic model ID
+- `features`: JSON feature flags
+- `price`, `currency`, `billing_period`: Pricing information
+- `sort_order`: Tier hierarchy
+- `is_active`, `is_featured`: Display flags
+- `metadata`: Additional JSON data
 - `timestamps`
+- Unique constraint: `(installation_id, product_id)`
 
 ### amember_webhook_logs
 Logs all webhook requests:
@@ -437,7 +548,59 @@ The package verifies webhook signatures using HMAC-SHA256. Make sure to:
 
 ## Testing
 
-Run the test suite:
+The package includes comprehensive testing helpers for simulating webhooks and events.
+
+### Faking Webhooks
+
+```php
+use Greatplr\AmemberSso\Facades\AmemberSso;
+
+// Fake all aMember events
+AmemberSso::fakeEvents();
+
+// Generate a webhook payload
+$webhookData = AmemberSso::fakeWebhook('accessAfterInsert', [
+    'access' => [
+        'product_id' => '5',
+        'user_id' => '100',
+    ],
+    'user' => [
+        'email' => 'test@example.com',
+    ],
+]);
+
+// Process webhook and assert events
+dispatch(new ProcessAmemberWebhook(
+    $webhookData['event_type'],
+    $webhookData['payload'],
+    $webhookData['installation']
+));
+
+Event::assertDispatched(SubscriptionAdded::class, function ($event) {
+    return $event->subscription['product_id'] === '5';
+});
+```
+
+### Testing Helpers
+
+```php
+use Greatplr\AmemberSso\Testing\AmemberSsoTestHelper;
+
+// Create test installation
+$installation = AmemberSsoTestHelper::createTestInstallation();
+
+// Fake specific event types
+$payload = AmemberSsoTestHelper::buildWebhookPayload('accessAfterInsert', [
+    'access' => ['product_id' => '5'],
+]);
+
+// Assert events
+AmemberSsoTestHelper::assertSubscriptionAdded();
+AmemberSsoTestHelper::assertUserCreated();
+AmemberSsoTestHelper::assertPaymentReceived();
+```
+
+### Run Test Suite
 
 ```bash
 composer test
