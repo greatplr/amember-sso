@@ -516,7 +516,7 @@ Stores product mapping information:
 - `is_active`, `is_featured`: Display flags
 - `metadata`: Additional JSON data
 - `timestamps`
-- Unique constraint: `(installation_id, product_id)`
+- **Note**: No unique constraint on `(installation_id, product_id)` - allows one aMember product to map to multiple resources
 
 ### amember_webhook_logs
 Logs all webhook requests:

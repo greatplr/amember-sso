@@ -6,6 +6,7 @@ use Greatplr\AmemberSso\Events\SubscriptionAdded;
 use Greatplr\AmemberSso\Events\SubscriptionDeleted;
 use Greatplr\AmemberSso\Events\SubscriptionUpdated;
 use Greatplr\AmemberSso\Models\AmemberInstallation;
+use Greatplr\AmemberSso\Models\AmemberProduct;
 use Greatplr\AmemberSso\Services\AmemberSsoService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -207,9 +208,15 @@ class WebhookController extends Controller
 
             $this->clearUserCache($userData);
 
+            // Get product mapping
+            $productMapping = AmemberProduct::findByAmemberProduct(
+                $accessData['product_id'] ?? null,
+                $installation->id
+            );
+
             DB::commit();
 
-            event(new SubscriptionAdded($subscription, $request->all()));
+            event(new SubscriptionAdded($subscription, $request->all(), $productMapping));
 
             Log::info('Access record created via webhook', [
                 'user_id' => $user->id,
@@ -240,9 +247,15 @@ class WebhookController extends Controller
 
             $this->clearUserCache($userData);
 
+            // Get product mapping
+            $productMapping = AmemberProduct::findByAmemberProduct(
+                $accessData['product_id'] ?? null,
+                $installation->id
+            );
+
             DB::commit();
 
-            event(new SubscriptionUpdated($subscription, $request->all()));
+            event(new SubscriptionUpdated($subscription, $request->all(), $productMapping));
         } catch (\Exception $e) {
             DB::rollBack();
             throw $e;
@@ -259,6 +272,12 @@ class WebhookController extends Controller
         $userData = $request->input('user', []);
         $tableName = config('amember-sso.tables.subscriptions');
 
+        // Get product mapping before deletion
+        $productMapping = AmemberProduct::findByAmemberProduct(
+            $accessData['product_id'] ?? null,
+            $installation->id
+        );
+
         DB::table($tableName)
             ->where('access_id', $accessData['access_id'] ?? null)
             ->where('installation_id', $installation->id)
@@ -266,7 +285,7 @@ class WebhookController extends Controller
 
         $this->clearUserCache($userData);
 
-        event(new SubscriptionDeleted($request->all()));
+        event(new SubscriptionDeleted($request->all(), $productMapping));
     }
 
     /**

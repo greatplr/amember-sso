@@ -51,10 +51,8 @@ return new class extends Migration
 
             $table->timestamps();
 
-            // Composite unique constraint - one tier per product per installation
-            $table->unique(['installation_id', 'product_id'], 'unique_installation_product');
-
             // Index for common queries
+            $table->index(['installation_id', 'product_id']);
             $table->index(['installation_id', 'tier']);
             $table->index(['installation_id', 'is_active']);
             $table->index(['mappable_type', 'mappable_id']);
