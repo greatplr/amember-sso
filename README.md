@@ -5,12 +5,17 @@ A comprehensive Laravel package that wraps `plutuss/amember-pro-laravel` to prov
 ## Features
 
 - **SSO Authentication**: Seamless single sign-on integration with aMember Pro
-- **Webhook Handling**: Automatic processing of subscription updates from aMember
+- **Multi-Installation Support**: Manage multiple aMember installations from a single Laravel app
+- **Webhook Handling**: Automatic processing of subscription updates with queue support (Horizon/Redis)
 - **Access Control Middleware**: Protect routes based on product access and subscription status
 - **Subscription Management**: Track and manage user subscriptions locally
+- **IP-Based Installation Detection**: Automatically detect which aMember installation sent webhooks
 - **Configurable Caching**: Improve performance with intelligent caching of subscription data
 - **Event System**: Listen to subscription events in your application
+- **Comprehensive Logging**: Database and debug logging for all webhook activity
+- **Queue Processing**: Background webhook processing with retry logic
 - **Laravel Auto-Discovery**: Automatic service provider registration
+- **Filament Integration**: Optional admin interface for managing installations
 
 ## Requirements
 
@@ -225,18 +230,21 @@ AmemberSso::clearSubscriptionCache($amemberUserId);
 
 The package automatically sets up a webhook endpoint at `/amember/webhook` (configurable).
 
-#### Configure aMember to Send Webhooks
+**See comprehensive guides:**
+- [WEBHOOK_SETUP.md](WEBHOOK_SETUP.md) - Configuration and essential webhooks
+- [WEBHOOK_WORKFLOWS.md](WEBHOOK_WORKFLOWS.md) - Complete workflow examples
+- [WEBHOOK_LOGGING.md](WEBHOOK_LOGGING.md) - Debugging and monitoring
+- [QUEUE_SETUP.md](QUEUE_SETUP.md) - Background processing with Horizon
 
-1. In your aMember admin panel, go to **Setup/Configuration → Plugins**
-2. Enable the **Webhooks** plugin
-3. Configure the webhook URL: `https://your-laravel-app.com/amember/webhook`
-4. Set the webhook secret (same as `AMEMBER_WEBHOOK_SECRET` in your `.env`)
-5. Select events to send:
-   - subscription.added
-   - subscription.updated
-   - subscription.deleted
-   - payment.completed
-   - payment.refunded
+#### Quick Setup
+
+1. In your aMember admin panel, go to **Setup/Configuration → Webhooks**
+2. Configure the webhook URL: `https://your-laravel-app.com/amember/webhook`
+3. Select essential events (see [WEBHOOK_SETUP.md](WEBHOOK_SETUP.md)):
+   - `accessAfterInsert` - Creates users and subscriptions
+   - `accessAfterUpdate` - Updates subscriptions on renewal
+   - `accessAfterDelete` - Removes subscriptions
+   - `userAfterUpdate` - Syncs user data changes
 
 #### Listening to Events
 
@@ -284,6 +292,39 @@ class HandleNewSubscription
     }
 }
 ```
+
+### Multi-Installation Support
+
+Manage multiple aMember installations from a single Laravel app.
+
+**See [MULTI_INSTALLATION.md](MULTI_INSTALLATION.md) for complete guide.**
+
+#### Quick Overview
+
+The package supports multiple aMember installations with:
+- **IP-based detection** - Webhooks automatically routed to correct installation
+- **Per-installation credentials** - Separate API keys and webhook secrets
+- **User matching** - Users identified by `(amember_user_id, installation_id)` composite key
+- **Optional Filament admin** - Manage installations via admin panel
+
+#### Add Installation
+
+```php
+use Greatplr\AmemberSso\Models\AmemberInstallation;
+
+AmemberInstallation::create([
+    'name' => 'Main Site',
+    'slug' => 'main',
+    'api_url' => 'https://main.com/amember/api',
+    'api_key' => 'your-api-key',
+    'ip_address' => '23.226.68.98',  // For webhook detection
+    'login_url' => 'https://main.com/amember/login',
+    'webhook_secret' => 'your-webhook-secret',
+    'is_active' => true,
+]);
+```
+
+All webhooks automatically include installation context - no additional configuration needed!
 
 ### Direct API Access
 
