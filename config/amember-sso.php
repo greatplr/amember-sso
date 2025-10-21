@@ -1,0 +1,130 @@
+<?php
+
+return [
+    /*
+    |--------------------------------------------------------------------------
+    | aMember API Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Configure your aMember Pro installation URL and API credentials.
+    |
+    */
+    'api_url' => env('AMEMBER_API_URL'),
+    'api_key' => env('AMEMBER_API_KEY'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | SSO Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Configure SSO behavior including login/logout URLs and session handling.
+    |
+    */
+    'sso' => [
+        'enabled' => env('AMEMBER_SSO_ENABLED', true),
+        'login_url' => env('AMEMBER_LOGIN_URL'),
+        'logout_url' => env('AMEMBER_LOGOUT_URL'),
+        'secret_key' => env('AMEMBER_SSO_SECRET'),
+
+        // Redirect URLs after SSO actions
+        'redirect_after_login' => env('AMEMBER_REDIRECT_AFTER_LOGIN', '/dashboard'),
+        'redirect_after_logout' => env('AMEMBER_REDIRECT_AFTER_LOGOUT', '/'),
+
+        // Session lifetime in minutes
+        'session_lifetime' => env('AMEMBER_SESSION_LIFETIME', 120),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Authentication Guard
+    |--------------------------------------------------------------------------
+    |
+    | Specify which Laravel guard should be used for SSO authentication.
+    |
+    */
+    'guard' => env('AMEMBER_GUARD', 'web'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | User Model
+    |--------------------------------------------------------------------------
+    |
+    | The User model that should be used for authentication.
+    |
+    */
+    'user_model' => env('AMEMBER_USER_MODEL', 'App\\Models\\User'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Webhook Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Configure webhook handling for subscription updates from aMember.
+    |
+    */
+    'webhook' => [
+        'enabled' => env('AMEMBER_WEBHOOK_ENABLED', true),
+        'secret' => env('AMEMBER_WEBHOOK_SECRET'),
+        'route_prefix' => env('AMEMBER_WEBHOOK_PREFIX', 'amember/webhook'),
+
+        // Events to listen for
+        'events' => [
+            'subscription.added',
+            'subscription.updated',
+            'subscription.deleted',
+            'payment.completed',
+            'payment.refunded',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Access Control
+    |--------------------------------------------------------------------------
+    |
+    | Configure product-based access control and subscription checking.
+    |
+    */
+    'access_control' => [
+        // Cache subscription data for performance
+        'cache_enabled' => env('AMEMBER_CACHE_ENABLED', true),
+        'cache_ttl' => env('AMEMBER_CACHE_TTL', 300), // 5 minutes
+
+        // Sync user data from aMember
+        'sync_user_data' => env('AMEMBER_SYNC_USER_DATA', true),
+
+        // Fields to sync from aMember to local user
+        'syncable_fields' => [
+            'email',
+            'name_f',
+            'name_l',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Database Tables
+    |--------------------------------------------------------------------------
+    |
+    | Customize the database table names used by the package.
+    |
+    */
+    'tables' => [
+        'subscriptions' => 'amember_subscriptions',
+        'products' => 'amember_products',
+        'webhook_logs' => 'amember_webhook_logs',
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Logging
+    |--------------------------------------------------------------------------
+    |
+    | Configure logging for SSO and webhook events.
+    |
+    */
+    'logging' => [
+        'enabled' => env('AMEMBER_LOGGING_ENABLED', true),
+        'channel' => env('AMEMBER_LOG_CHANNEL', 'stack'),
+    ],
+];
