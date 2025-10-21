@@ -68,6 +68,10 @@ return [
         'secret' => env('AMEMBER_WEBHOOK_SECRET'),
         'route_prefix' => env('AMEMBER_WEBHOOK_PREFIX', 'amember/webhook'),
 
+        // Queue Configuration
+        'use_queue' => env('AMEMBER_WEBHOOK_USE_QUEUE', true),
+        'queue_name' => env('AMEMBER_WEBHOOK_QUEUE', 'amember-webhooks'),
+
         // Events to listen for (aMember uses camelCase event names)
         'events' => [
             'subscriptionAdded',       // User gets new product subscription

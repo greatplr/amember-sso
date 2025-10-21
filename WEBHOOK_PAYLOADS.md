@@ -15,23 +15,34 @@ Complete documentation of webhook payloads sent by aMember Pro.
 ### Headers
 
 ```
-Content-Type: application/x-www-form-urlencoded
+Content-Type: application/json
 User-Agent: aMember PRO/6.3.31 (https://www.amember.com)
 ```
 
 ### Body Format
 
-aMember sends **flattened POST data** with bracket notation:
+aMember sends **JSON** with nested objects:
 
-```
-user[user_id]=1048
-user[email]=user@example.com
-user[name_f]=John
-product[product_id]=31
-product[title]=Product Name
+```json
+{
+  "am-webhooks-version": "1.0",
+  "am-event": "accessAfterInsert",
+  "am-timestamp": "2025-06-17T22:53:45-06:00",
+  "am-root-url": "https://example.com/members",
+  "access": {
+    "access_id": "3252",
+    "product_id": "5",
+    "user_id": "302"
+  },
+  "user": {
+    "user_id": "302",
+    "email": "user@example.com",
+    "name_f": "John"
+  }
+}
 ```
 
-**Important:** Data is sent as `application/x-www-form-urlencoded`, NOT JSON!
+**Important:** Data is sent as `application/json`, NOT form-encoded!
 
 ## Common Fields
 
@@ -174,52 +185,138 @@ product[description]: Full access to all features
 
 ### accessAfterInsert Event
 
-**Real example from aMember 6.3.35 (anonymized):**
+**Real example from aMember production (anonymized):**
 
-```
-Content-Type: application/x-www-form-urlencoded
-User-Agent: aMember PRO/6.3.35 (https://www.amember.com)
-
-am-webhooks-version: 1.0
-am-event: accessAfterInsert
-am-timestamp: 2025-10-20T18:37:07-06:00
-am-root-url: https://example.com/members
-
-access[access_id]: 3911
-access[invoice_id]: 3053
-access[invoice_public_id]: DG9J5
-access[invoice_payment_id]: 3431
-access[invoice_item_id]: 3058
-access[user_id]: 1977
-access[product_id]: 50
-access[transaction_id]: 5T409668ET921644V
-access[begin_date]: 2025-10-20
-access[expire_date]: 2037-12-31
-access[qty]: 1
-
-user[user_id]: 1977
-user[login]: johndoe
-user[pass]: $P$B0YRy6lJMeFmTqwW1r3VOQqhxs71cu0
-user[pass_dattm]: 2025-10-20 18:37:06
-user[email]: john@example.com
-user[name_f]: John
-user[name_l]: Doe
-user[state]: CA
-user[country]: US
-user[added]: 2025-10-20 18:37:06
-user[remote_addr]: 192.0.2.1
-user[status]: 0
-user[unsubscribed]: 0
-user[i_agree]: 0
-user[is_approved]: 1
-user[is_locked]: 0
-user[email_confirmed]: 0
-user[subusers_parent_id]: 0
-user[mobile_confirmed]: 0
-user[data.external_id]: johndoeexamplecom
+```json
+{
+  "am-webhooks-version": "1.0",
+  "am-event": "accessAfterInsert",
+  "am-timestamp": "2025-06-17T22:53:45-06:00",
+  "am-root-url": "https://example.com/members",
+  "access": {
+    "access_id": "3252",
+    "invoice_id": "484",
+    "invoice_public_id": "5Q7F5",
+    "invoice_payment_id": "2809",
+    "invoice_item_id": "484",
+    "user_id": "302",
+    "product_id": "5",
+    "transaction_id": "0J540749EW088400G-B084",
+    "begin_date": "2025-06-20",
+    "expire_date": "2025-07-20",
+    "qty": "1"
+  },
+  "user": {
+    "user_id": "302",
+    "login": "johndoe",
+    "pass": "$P$BBr9zIzfI2eLPaMeJCj.KNjwySEwIv.",
+    "pass_dattm": "2018-08-28 16:00:53",
+    "email": "john@example.com",
+    "name_f": "John",
+    "name_l": "Doe",
+    "state": "",
+    "country": "US",
+    "added": "2018-07-18 07:30:36",
+    "remote_addr": "192.0.2.1",
+    "status": "1",
+    "unsubscribed": "0",
+    "i_agree": "0",
+    "is_approved": "1",
+    "is_locked": "0",
+    "last_login": "2019-04-24 15:17:24",
+    "last_ip": "192.0.2.2",
+    "last_user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/73.0.3683.103 Safari/537.36",
+    "email_confirmed": "0",
+    "subusers_parent_id": "0",
+    "mobile_confirmed": "0",
+    "data.aweber.5087766": "71758987",
+    "data.aweber.5087769": "78591587",
+    "data.external_id": "johndoeexamplecom",
+    "data.need_session_refresh": "1",
+    "data.signup_email_sent": "1"
+  }
+}
 ```
 
 **Note:** This is the MAIN event for creating subscriptions. It includes the full access record with dates, invoice information, and complete user data.
+
+### accessAfterDelete Event
+
+**Real example from aMember production (anonymized):**
+
+```json
+{
+  "am-webhooks-version": "1.0",
+  "am-event": "accessAfterDelete",
+  "am-timestamp": "2025-07-01T10:11:03-06:00",
+  "am-root-url": "https://example.com/members",
+  "access": {
+    "access_id": "3532",
+    "invoice_id": "2711",
+    "invoice_public_id": "71RUC",
+    "invoice_payment_id": "3087",
+    "invoice_item_id": "2715",
+    "user_id": "1803",
+    "product_id": "50",
+    "transaction_id": "05687560CT632713C",
+    "begin_date": "2025-06-30",
+    "expire_date": "2037-12-31",
+    "qty": "1",
+    "comment": ""
+  },
+  "user": {
+    "user_id": "1803",
+    "login": "johndoe",
+    "pass": "$P$BQ3.6fs6A8kajPPp/utFqbFC4Zc5YK1",
+    "remember_key": "b3fb8bb8504ef99ee8448a63b95ee1765284bae1",
+    "pass_dattm": "2025-06-30 09:43:24",
+    "email": "john@example.com",
+    "name_f": "John",
+    "name_l": "Doe",
+    "street": "",
+    "street2": "",
+    "city": "",
+    "state": "",
+    "zip": "",
+    "country": "US",
+    "phone": "",
+    "added": "2025-06-30 09:43:24",
+    "remote_addr": "192.0.2.1",
+    "user_agent": "",
+    "saved_form_id": "",
+    "status": "1",
+    "unsubscribed": "0",
+    "lang": "",
+    "i_agree": "0",
+    "is_approved": "1",
+    "is_locked": "0",
+    "disable_lock_until": "",
+    "reseller_id": "",
+    "comment": "",
+    "tax_id": "",
+    "last_login": "2025-07-01 09:21:33",
+    "last_ip": "192.0.2.2",
+    "last_user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36",
+    "aff_id": "",
+    "aff_added": "",
+    "is_affiliate": "",
+    "aff_payout_type": "",
+    "email_confirmed": "0",
+    "email_confirmation_date": "",
+    "subusers_parent_id": "0",
+    "auth_key": "",
+    "mobile_area_code": "",
+    "mobile_number": "",
+    "mobile_confirmed": "0",
+    "mobile_confirmation_date": "",
+    "data.external_id": "johndoeexamplecom",
+    "data.need_session_refresh": "1",
+    "data.signup_email_sent": "1"
+  }
+}
+```
+
+**Note:** This fires when access is deleted (refund, expiration, or manual removal). Contains the same access record structure as `accessAfterInsert`.
 
 ### paymentAfterInsert Event
 
@@ -259,11 +356,24 @@ items[0][first_price]: 99.00
 
 ### Understanding the Format
 
-aMember sends data as **form-encoded** (`application/x-www-form-urlencoded`) with bracket notation. Laravel automatically parses this into nested arrays.
+aMember sends data as **JSON** (`application/json`). Laravel automatically parses this into nested arrays.
 
 **Raw POST data (what aMember sends):**
-```
-access[access_id]=3911&access[product_id]=50&user[user_id]=1977&user[email]=test@example.com
+```json
+{
+  "am-webhooks-version": "1.0",
+  "am-event": "accessAfterInsert",
+  "am-timestamp": "2025-06-17T22:53:45-06:00",
+  "access": {
+    "access_id": "3252",
+    "product_id": "5",
+    "user_id": "302"
+  },
+  "user": {
+    "user_id": "302",
+    "email": "john@example.com"
+  }
+}
 ```
 
 **What Laravel receives (automatically parsed):**
@@ -271,41 +381,47 @@ access[access_id]=3911&access[product_id]=50&user[user_id]=1977&user[email]=test
 $request->all() = [
     'am-webhooks-version' => '1.0',
     'am-event' => 'accessAfterInsert',
-    'am-timestamp' => '2025-10-20T18:37:07-06:00',
+    'am-timestamp' => '2025-06-17T22:53:45-06:00',
     'access' => [
-        'access_id' => '3911',
-        'product_id' => '50',
-        'user_id' => '1977',
-        'begin_date' => '2025-10-20',
-        'expire_date' => '2037-12-31',
+        'access_id' => '3252',
+        'product_id' => '5',
+        'user_id' => '302',
+        'begin_date' => '2025-06-20',
+        'expire_date' => '2025-07-20',
     ],
     'user' => [
-        'user_id' => '1977',
-        'email' => 'test@example.com',
-        'name_f' => 'michael',
-        'name_l' => 'mack',
+        'user_id' => '302',
+        'email' => 'john@example.com',
+        'name_f' => 'John',
+        'name_l' => 'Doe',
     ]
 ]
 ```
 
-**Important:** You don't need to manually parse the bracket notation - Laravel does it automatically!
+**Important:** You don't need to manually parse JSON - Laravel does it automatically!
 
 ### Accessing Data
 
 ```php
-// Method 1: Array access
+// Method 1: Dot notation
 $userId = $request->input('user.user_id');
 $email = $request->input('user.email');
-$productId = $request->input('product.product_id');
+$productId = $request->input('access.product_id');
 
-// Method 2: Get entire object
-$user = $request->input('user');
-$product = $request->input('product');
-$access = $request->input('access');
+// Method 2: Get entire nested array
+$user = $request->input('user', []);
+$access = $request->input('access', []);
 
 // Method 3: Metadata
 $event = $request->input('am-event');
 $timestamp = $request->input('am-timestamp');
+
+// Real example from webhook:
+$accessData = $request->input('access');
+// Returns: ['access_id' => '3252', 'product_id' => '5', ...]
+
+$userData = $request->input('user');
+// Returns: ['user_id' => '302', 'email' => 'john@example.com', ...]
 ```
 
 ### Event Detection
@@ -450,20 +566,22 @@ $this->post('/amember/webhook', [
 ]);
 ```
 
-## Differences from Our Current Implementation
+## Key Implementation Details
 
-### What We Got Wrong
+### Payload Format
 
-1. **Event names:** We used `subscription.added`, aMember uses `subscriptionAdded`
-2. **Payload structure:** We expected flat data, aMember sends nested arrays
-3. **Fields:** We looked for `access_id`, but it's in `access[access_id]`
-4. **No signature header:** We expected `X-Amember-Signature`, but it's not sent by default
+1. **Content-Type:** `application/json` (not form-encoded)
+2. **Event names:** camelCase (`accessAfterInsert`, `subscriptionDeleted`)
+3. **Structure:** Nested JSON objects (`access`, `user`, `product`)
+4. **Laravel:** Automatically parses JSON into nested arrays
 
-### What We Got Right
+### What Works
 
-1. **IP detection:** Yes, webhooks come from static IPs
-2. **User creation:** Yes, we need to create users from webhook data
-3. **Multiple installations:** Yes, installations can be differentiated
+1. ✅ **IP detection:** Webhooks come from static IPs - use for installation detection
+2. ✅ **User creation:** `accessAfterInsert` includes full user data
+3. ✅ **Multiple installations:** Differentiate by source IP
+4. ✅ **Laravel parsing:** `$request->input('access')` returns the access array
+5. ✅ **Nested access:** `$request->input('user.email')` works perfectly
 
 ## Next Steps
 

@@ -52,21 +52,20 @@ class WebhookController extends Controller
 
             $this->logWebhook($request, 'received', "Event: {$eventType} from {$installation->name}");
 
-            // Process the webhook based on event type (aMember uses camelCase)
-            match ($eventType) {
-                'subscriptionAdded' => $this->handleSubscriptionAdded($request, $installation),
-                'subscriptionDeleted' => $this->handleSubscriptionDeleted($request, $installation),
-                'accessAfterInsert' => $this->handleAccessAfterInsert($request, $installation),
-                'accessAfterUpdate' => $this->handleAccessAfterUpdate($request, $installation),
-                'accessAfterDelete' => $this->handleAccessAfterDelete($request, $installation),
-                'paymentAfterInsert' => $this->handlePaymentAfterInsert($request, $installation),
-                'invoicePaymentRefund' => $this->handleInvoicePaymentRefund($request, $installation),
-                'userAfterInsert' => $this->handleUserAfterInsert($request, $installation),
-                'userAfterUpdate' => $this->handleUserAfterUpdate($request, $installation),
-                default => $this->logWebhook($request, 'ignored', "Unknown event type: {$eventType}"),
-            };
+            // Dispatch to queue for background processing (or process sync if queues disabled)
+            if (config('amember-sso.webhook.use_queue', true)) {
+                \Greatplr\AmemberSso\Jobs\ProcessAmemberWebhook::dispatch(
+                    $eventType,
+                    $request->all(),
+                    $installation
+                )->onQueue(config('amember-sso.webhook.queue_name', 'amember-webhooks'));
 
-            $this->logWebhook($request, 'processed', "Successfully processed {$eventType}");
+                $this->logWebhook($request, 'queued', "Queued {$eventType} for processing");
+            } else {
+                // Fallback to synchronous processing if queues are disabled
+                $this->processSynchronously($eventType, $request, $installation);
+                $this->logWebhook($request, 'processed', "Successfully processed {$eventType}");
+            }
 
             return response()->json(['status' => 'success']);
         } catch (\Exception $e) {
@@ -77,6 +76,25 @@ class WebhookController extends Controller
 
             return response()->json(['error' => 'Processing failed'], 500);
         }
+    }
+
+    /**
+     * Process webhook synchronously (when queues are disabled).
+     */
+    protected function processSynchronously(string $eventType, Request $request, AmemberInstallation $installation): void
+    {
+        match ($eventType) {
+            'subscriptionAdded' => $this->handleSubscriptionAdded($request, $installation),
+            'subscriptionDeleted' => $this->handleSubscriptionDeleted($request, $installation),
+            'accessAfterInsert' => $this->handleAccessAfterInsert($request, $installation),
+            'accessAfterUpdate' => $this->handleAccessAfterUpdate($request, $installation),
+            'accessAfterDelete' => $this->handleAccessAfterDelete($request, $installation),
+            'paymentAfterInsert' => $this->handlePaymentAfterInsert($request, $installation),
+            'invoicePaymentRefund' => $this->handleInvoicePaymentRefund($request, $installation),
+            'userAfterInsert' => $this->handleUserAfterInsert($request, $installation),
+            'userAfterUpdate' => $this->handleUserAfterUpdate($request, $installation),
+            default => Log::warning('Unknown webhook event type', ['event' => $eventType]),
+        };
     }
 
     /**
