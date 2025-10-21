@@ -3,19 +3,16 @@
 namespace Greatplr\AmemberSso\Http\Middleware;
 
 use Closure;
-use Greatplr\AmemberSso\Services\AmemberSsoService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\Response;
 
 class CheckAmemberSubscription
 {
-    public function __construct(
-        protected AmemberSsoService $amemberSso
-    ) {}
-
     /**
      * Handle an incoming request.
+     * Checks LOCAL database for any active subscription (populated by webhooks).
      *
      * @param  \Closure(\Illuminate\Http\Request): (\Symfony\Component\HttpFoundation\Response)  $next
      */
@@ -28,21 +25,40 @@ class CheckAmemberSubscription
             return $this->unauthorized($request, 'User not authenticated');
         }
 
-        // Get the user's email or login for check-access API
-        $loginOrEmail = $user->email ?? $user->login ?? null;
+        // Get the user's aMember ID
+        $amemberUserId = $user->amember_user_id;
 
-        if (!$loginOrEmail) {
-            return $this->unauthorized($request, 'User email/login not found');
+        if (!$amemberUserId) {
+            return $this->unauthorized($request, 'User not linked to aMember account');
         }
 
-        // Check if user has any active subscription using check-access API
-        $hasActiveSubscription = $this->amemberSso->hasActiveSubscription($loginOrEmail, true);
+        // Check LOCAL database for any active subscription
+        $hasActiveSubscription = $this->checkLocalActiveSubscription($amemberUserId);
 
         if (!$hasActiveSubscription) {
             return $this->unauthorized($request, 'Access denied. No active subscription found.');
         }
 
         return $next($request);
+    }
+
+    /**
+     * Check if user has any active subscription in local database.
+     */
+    protected function checkLocalActiveSubscription(int $amemberUserId): bool
+    {
+        $tableName = config('amember-sso.tables.subscriptions');
+
+        $activeSubscription = DB::table($tableName)
+            ->where('user_id', $amemberUserId)
+            ->where(function ($query) {
+                $query->where('expire_date', '>', now())
+                    ->orWhereNull('expire_date'); // Lifetime subscriptions
+            })
+            ->where('begin_date', '<=', now())
+            ->exists();
+
+        return $activeSubscription;
     }
 
     /**

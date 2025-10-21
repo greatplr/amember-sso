@@ -125,38 +125,52 @@ class AmemberSsoService
     }
 
     /**
-     * Authenticate Laravel user from aMember check-access response.
-     * This syncs the user to your local database and logs them in.
+     * Authenticate Laravel user from aMember.
+     * This matches the aMember user to local user and logs them in.
+     * Does NOT check product access - that's handled by webhooks + local DB.
      */
-    public function loginFromCheckAccess(string $loginOrEmail, bool $isEmail = false): ?object
+    public function loginFromAmember(string $loginOrEmail, bool $isEmail = false): ?object
     {
         try {
-            // Check access via aMember API
+            // Verify user exists in aMember
             $accessData = $isEmail
                 ? $this->checkAccessByEmail($loginOrEmail)
                 : $this->checkAccessByLogin($loginOrEmail);
 
-            if (!$accessData) {
-                $this->logError("Access check failed for: {$loginOrEmail}");
-                return null;
-            }
-
-            // Get full user data from aMember
-            $amemberUser = $this->getUserByLogin($loginOrEmail);
-
-            if (!$amemberUser) {
+            if (!$accessData || !$accessData['ok']) {
                 $this->logError("User not found in aMember: {$loginOrEmail}");
                 return null;
             }
 
-            // Find or create local user
-            $userModel = config('amember-sso.user_model');
-            $email = $amemberUser['email'] ?? $loginOrEmail;
-            $user = $userModel::where('email', $email)->first();
+            // Get aMember user ID from response or fetch full user data
+            $amemberUserId = null;
+            $email = null;
+
+            // Try to get user_id from access data if available
+            if (isset($accessData['user_id'])) {
+                $amemberUserId = $accessData['user_id'];
+            }
+
+            // Get full user data if needed
+            $amemberUser = $this->getUserByLogin($loginOrEmail);
+
+            if ($amemberUser) {
+                $amemberUserId = $amemberUser['user_id'] ?? $amemberUserId;
+                $email = $amemberUser['email'] ?? $loginOrEmail;
+            } else {
+                $email = $isEmail ? $loginOrEmail : null;
+            }
+
+            // Find local user - try amember_user_id first, then email
+            $user = $this->findLocalUser($amemberUserId, $email);
 
             if (!$user) {
-                $user = $this->createLocalUser($amemberUser, $accessData);
-            } elseif (config('amember-sso.access_control.sync_user_data')) {
+                $this->logError("User not found locally. They need to be created via webhook first: {$loginOrEmail}");
+                return null;
+            }
+
+            // Optionally sync user data
+            if ($amemberUser && config('amember-sso.access_control.sync_user_data')) {
                 $user = $this->syncUserData($user, $amemberUser);
             }
 
@@ -171,6 +185,39 @@ class AmemberSsoService
             $this->logError("Login failed: {$e->getMessage()}");
             return null;
         }
+    }
+
+    /**
+     * Find local user by aMember user ID or email.
+     * Prioritizes amember_user_id for matching.
+     */
+    protected function findLocalUser(?int $amemberUserId, ?string $email): ?object
+    {
+        $userModel = config('amember-sso.user_model');
+
+        // First try to find by amember_user_id (most reliable)
+        if ($amemberUserId) {
+            $user = $userModel::where('amember_user_id', $amemberUserId)->first();
+            if ($user) {
+                return $user;
+            }
+        }
+
+        // Fall back to email
+        if ($email) {
+            $user = $userModel::where('email', $email)->first();
+
+            // If found by email but doesn't have amember_user_id, update it
+            if ($user && $amemberUserId && !$user->amember_user_id) {
+                $user->amember_user_id = $amemberUserId;
+                $user->save();
+                $this->logInfo("Updated amember_user_id for user: {$email}");
+            }
+
+            return $user;
+        }
+
+        return null;
     }
 
     /**

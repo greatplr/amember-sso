@@ -21,28 +21,58 @@ AMEMBER_SSO_SECRET=your-sso-secret-key
 AMEMBER_WEBHOOK_SECRET=your-webhook-secret
 ```
 
+## Important: Webhook-First Architecture
+
+This package uses a **webhook-first** approach:
+1. **Webhooks** create users and manage subscriptions in your local database
+2. **Login** authenticates users and matches them to local accounts
+3. **Middleware** checks local database (fast, no API calls)
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed flow.
+
 ## Basic Usage
 
-### 1. Authentication
+### 1. Setup Webhooks (Do This First!)
+
+Configure in aMember **before** users can login:
+- Webhook URL: `https://your-site.com/amember/webhook`
+- Secret: Same as `AMEMBER_WEBHOOK_SECRET`
+- Events: subscription.added, subscription.updated, subscription.deleted
+
+Webhooks will:
+- Create users with `amember_user_id`
+- Sync subscription data to local database
+- Fire Laravel events for custom logic
+
+### 2. Authentication
 
 ```php
 use Greatplr\AmemberSso\Facades\AmemberSso;
 
 // Authenticate with login/password
-$accessData = AmemberSso::authenticateByLoginPass('username', 'password');
+$accessData = AmemberSso::authenticateByLoginPass('user@example.com', 'password');
 if ($accessData && $accessData['ok']) {
-    // User authenticated, auto-login to Laravel
-    $user = AmemberSso::loginFromCheckAccess('username');
-}
+    // User verified in aMember, now login to Laravel
+    // Matches by amember_user_id (preferred) or email (fallback)
+    $user = AmemberSso::loginFromAmember('user@example.com', true);
 
-// Or login with just email/username (if already verified)
-$user = AmemberSso::loginFromCheckAccess('user@example.com', true); // true = isEmail
+    if ($user) {
+        // User logged in successfully
+        return redirect('/dashboard');
+    } else {
+        // User exists in aMember but not locally
+        // They need to be created via webhook first
+        return back()->withErrors(['email' => 'Please complete signup first']);
+    }
+}
 
 // Generate SSO URL for redirect to aMember
 $ssoUrl = AmemberSso::generateSsoUrl('username', '/redirect-back-url');
 ```
 
-### 2. Protect Routes with Middleware
+### 3. Protect Routes with Middleware
+
+Middleware checks **local database** (fast, no API calls):
 
 ```php
 // Require specific product access
@@ -50,50 +80,53 @@ Route::get('/premium', function () {
     return view('premium');
 })->middleware(['auth', 'amember.product:1']);
 
-// Require any active subscription
+// Multiple products (access to any)
 Route::get('/members', function () {
     return view('members');
+})->middleware(['auth', 'amember.product:1,2,3']);
+
+// Require any active subscription
+Route::get('/dashboard', function () {
+    return view('dashboard');
 })->middleware(['auth', 'amember.subscription']);
 ```
 
-### 3. Check Access in Code
+**Note:** Middleware queries `amember_subscriptions` table (populated by webhooks).
+
+### 4. Check Access in Code (Optional)
+
+You can also check access programmatically using the **check-access API**:
 
 ```php
 use Greatplr\AmemberSso\Facades\AmemberSso;
 
 $userEmail = auth()->user()->email;
 
-// Check product access (uses check-access API)
-if (AmemberSso::hasProductAccess($userEmail, 1, true)) { // true = isEmail
-    // User has access to product ID 1
-}
-
-// Check multiple products
-if (AmemberSso::hasProductAccess($userEmail, [1, 2, 3], true)) {
-    // User has access to at least one of these products
-}
-
-// Check active subscription
-if (AmemberSso::hasActiveSubscription($userEmail, true)) {
-    // User has active subscription
-}
-
-// Get access data (subscriptions with expiration dates)
+// Get real-time access data from aMember API
 $accessData = AmemberSso::getUserAccess($userEmail, true);
 // Returns: ['ok' => true, 'name' => 'Bob Smith', 'subscriptions' => [12 => '2050-01-01', ...]]
 
-// Get detailed access records (uses access API)
-$accessRecords = AmemberSso::getAccessRecords($amemberUserId);
+// Check product access via API (cached for performance)
+if (AmemberSso::hasProductAccess($userEmail, 1, true)) {
+    // User has access
+}
+
+// Get detailed subscription records from local DB
+$user = auth()->user();
+$subscriptions = DB::table('amember_subscriptions')
+    ->where('user_id', $user->amember_user_id)
+    ->where('expire_date', '>', now())
+    ->get();
 ```
 
-### 4. Setup Webhooks
+**Recommendation:** Use middleware for route protection (faster, uses local DB).
+
+### 5. Listen to Webhook Events
 
 Configure in aMember:
 - Webhook URL: `https://your-site.com/amember/webhook`
 - Secret: Same as `AMEMBER_WEBHOOK_SECRET`
 - Events: subscription.added, subscription.updated, subscription.deleted
-
-### 5. Listen to Events
 
 ```php
 // In EventServiceProvider.php

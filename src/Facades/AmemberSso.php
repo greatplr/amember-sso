@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static ?array checkAccessByEmail(string $email)
  * @method static ?array authenticateByLoginPass(string $login, string $password, ?string $ip = null)
  * @method static string generateSsoUrl(string $login, ?string $redirectUrl = null)
- * @method static ?object loginFromCheckAccess(string $loginOrEmail, bool $isEmail = false)
+ * @method static ?object loginFromAmember(string $loginOrEmail, bool $isEmail = false)
  * @method static ?array getUserByLogin(string $login)
  * @method static ?array getUserById(int $userId)
  * @method static ?array getUserAccess(string $loginOrEmail, bool $isEmail = false)
