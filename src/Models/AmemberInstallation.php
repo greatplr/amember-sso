@@ -14,6 +14,7 @@ class AmemberInstallation extends Model
         'api_url',
         'ip_address',
         'login_url',
+        'button_text',
         'api_key',
         'webhook_secret',
         'is_active',
@@ -55,6 +56,21 @@ class AmemberInstallation extends Model
         }
 
         return $url;
+    }
+
+    /**
+     * Get login button data for rendering in views.
+     *
+     * @param string|null $redirectUrl Optional redirect URL after login
+     * @return array{text: string, url: string, installation: string}
+     */
+    public function getLoginButtonData(?string $redirectUrl = null): array
+    {
+        return [
+            'text' => $this->button_text ?? 'Login to ' . $this->name,
+            'url' => $this->getLoginUrl($redirectUrl),
+            'installation' => $this->name,
+        ];
     }
 
     /**

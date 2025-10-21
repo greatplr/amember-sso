@@ -70,6 +70,35 @@ if ($accessData && $accessData['ok']) {
 $ssoUrl = AmemberSso::generateSsoUrl('username', '/redirect-back-url');
 ```
 
+### 2.1 Login Buttons for Multiple Installations
+
+If you have multiple aMember installations, you can easily generate login buttons:
+
+```php
+use Greatplr\AmemberSso\Models\AmemberInstallation;
+
+// Get all active installations
+$installations = AmemberInstallation::active()->get();
+
+// In your Blade view
+@foreach($installations as $installation)
+    @php
+        $buttonData = $installation->getLoginButtonData(url('/dashboard'));
+    @endphp
+    <a href="{{ $buttonData['url'] }}" class="btn btn-primary">
+        {{ $buttonData['text'] }}
+    </a>
+@endforeach
+```
+
+You can customize the button text per installation in the database:
+
+```php
+$installation = AmemberInstallation::find(1);
+$installation->button_text = 'Login to Premium Membership';
+$installation->save();
+```
+
 ### 3. Protect Routes with Middleware
 
 Middleware checks **local database** (fast, no API calls):

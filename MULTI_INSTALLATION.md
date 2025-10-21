@@ -78,6 +78,7 @@ Both stored in same users table, differentiated by installation_id
 - api_url (e.g., "https://example.com/api")
 - ip_address (for webhook detection)
 - login_url (for SSO redirects)
+- button_text (e.g., "Login to Premium")
 - api_key
 - webhook_secret
 - is_active
@@ -247,6 +248,83 @@ $subdomain = request()->getHost();
 $installation = AmemberInstallation::bySlug($subdomain)->first();
 ```
 
+## Login Buttons for Multiple Installations
+
+When you have multiple aMember installations, you can easily generate login buttons for each one:
+
+### Basic Usage
+
+```php
+use Greatplr\AmemberSso\Models\AmemberInstallation;
+
+// In your controller
+public function showLoginOptions()
+{
+    $installations = AmemberInstallation::active()->get();
+    return view('auth.login-options', compact('installations'));
+}
+```
+
+### Blade View
+
+```blade
+{{-- resources/views/auth/login-options.blade.php --}}
+
+<div class="login-options">
+    <h2>Select Your Membership</h2>
+
+    @foreach($installations as $installation)
+        @php
+            $buttonData = $installation->getLoginButtonData(route('dashboard'));
+        @endphp
+
+        <a href="{{ $buttonData['url'] }}" class="btn btn-primary">
+            {{ $buttonData['text'] }}
+        </a>
+    @endforeach
+</div>
+```
+
+### Customize Button Text
+
+You can customize the button text per installation:
+
+```php
+$installation = AmemberInstallation::find(1);
+$installation->button_text = 'Login to Premium Membership';
+$installation->save();
+```
+
+If `button_text` is not set, it defaults to: `"Login to {name}"` (e.g., "Login to Main Site")
+
+### Advanced: With Redirect URLs
+
+```php
+// Pass a custom redirect URL per button
+@foreach($installations as $installation)
+    @php
+        $redirectUrl = route('membership.dashboard', ['installation' => $installation->slug]);
+        $buttonData = $installation->getLoginButtonData($redirectUrl);
+    @endphp
+
+    <a href="{{ $buttonData['url'] }}" class="btn btn-{{ $installation->slug }}">
+        {{ $buttonData['text'] }}
+    </a>
+@endforeach
+```
+
+### Button Data Structure
+
+The `getLoginButtonData()` method returns:
+
+```php
+[
+    'text' => 'Login to Premium',        // Custom text or default
+    'url' => 'https://example.com/login?amember_redirect_url=...', // Full SSO URL
+    'installation' => 'Main Site',       // Installation name
+]
+```
+
 ## Filament Admin Interface (Optional)
 
 Create a Filament resource to manage installations:
@@ -297,6 +375,12 @@ class AmemberInstallationResource extends Resource
                     ->label('Login URL')
                     ->url()
                     ->placeholder('https://example.com/login'),
+
+                Forms\Components\TextInput::make('button_text')
+                    ->label('Login Button Text')
+                    ->maxLength(100)
+                    ->placeholder('Login to Premium')
+                    ->helperText('Custom text for login buttons (optional)'),
 
                 Forms\Components\TextInput::make('api_key')
                     ->label('API Key')
