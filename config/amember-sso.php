@@ -149,5 +149,8 @@ return [
     'logging' => [
         'enabled' => env('AMEMBER_LOGGING_ENABLED', true),
         'channel' => env('AMEMBER_LOG_CHANNEL', 'stack'),
+
+        // Debug mode - logs verbose webhook details to Laravel log
+        'debug_webhooks' => env('AMEMBER_DEBUG_WEBHOOKS', false),
     ],
 ];

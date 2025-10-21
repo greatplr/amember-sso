@@ -52,6 +52,18 @@ class WebhookController extends Controller
 
             $this->logWebhook($request, 'received', "Event: {$eventType} from {$installation->name}");
 
+            // Debug logging (if enabled)
+            if (config('amember-sso.logging.debug_webhooks', false)) {
+                Log::channel(config('amember-sso.logging.channel'))->debug('aMember Webhook Debug', [
+                    'event' => $eventType,
+                    'installation' => $installation->name,
+                    'installation_id' => $installation->id,
+                    'ip' => $request->ip(),
+                    'headers' => $request->headers->all(),
+                    'payload' => $request->all(),
+                ]);
+            }
+
             // Dispatch to queue for background processing (or process sync if queues disabled)
             if (config('amember-sso.webhook.use_queue', true)) {
                 \Greatplr\AmemberSso\Jobs\ProcessAmemberWebhook::dispatch(
