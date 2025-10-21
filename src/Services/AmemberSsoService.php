@@ -485,4 +485,178 @@ class AmemberSsoService
     {
         return AMemberClient::getInstance();
     }
+
+    /**
+     * Product Mapping Methods
+     */
+
+    /**
+     * Get product mapping for an aMember product ID.
+     */
+    public function getProductMapping(string $amemberProductId, $installationId): ?\Greatplr\AmemberSso\Models\AmemberProduct
+    {
+        return \Greatplr\AmemberSso\Models\AmemberProduct::findByAmemberProduct($amemberProductId, $installationId);
+    }
+
+    /**
+     * Get product mapping by tier.
+     */
+    public function getProductByTier(string $tier, $installationId): ?\Greatplr\AmemberSso\Models\AmemberProduct
+    {
+        return \Greatplr\AmemberSso\Models\AmemberProduct::findByTier($tier, $installationId);
+    }
+
+    /**
+     * Check if user has specific tier access.
+     */
+    public function hasTierAccess(string $amemberUserId, string $tier, $installationId = null): bool
+    {
+        $product = $this->getProductByTier($tier, $installationId);
+
+        if (!$product) {
+            return false;
+        }
+
+        return $this->hasProductAccessLocal($amemberUserId, $product->product_id, $installationId);
+    }
+
+    /**
+     * Get user's active tier(s).
+     */
+    public function getUserTiers(string $amemberUserId, $installationId = null): array
+    {
+        $tableName = config('amember-sso.tables.subscriptions');
+        $productsTable = config('amember-sso.tables.products');
+
+        $query = \Illuminate\Support\Facades\DB::table($tableName)
+            ->join($productsTable, function ($join) use ($tableName, $productsTable) {
+                $join->on("$tableName.product_id", '=', "$productsTable.product_id")
+                     ->on("$tableName.installation_id", '=', "$productsTable.installation_id");
+            })
+            ->where("$tableName.user_id", $amemberUserId)
+            ->where("$tableName.status", 'active')
+            ->where(function ($q) use ($tableName) {
+                $q->whereNull("$tableName.expire_date")
+                  ->orWhere("$tableName.expire_date", '>', now());
+            })
+            ->whereNotNull("$productsTable.tier");
+
+        if ($installationId) {
+            $query->where("$tableName.installation_id", $installationId);
+        }
+
+        return $query->pluck("$productsTable.tier")->unique()->toArray();
+    }
+
+    /**
+     * Get user's highest tier (based on sort_order).
+     */
+    public function getUserHighestTier(string $amemberUserId, $installationId = null): ?string
+    {
+        $tableName = config('amember-sso.tables.subscriptions');
+        $productsTable = config('amember-sso.tables.products');
+
+        $query = \Illuminate\Support\Facades\DB::table($tableName)
+            ->join($productsTable, function ($join) use ($tableName, $productsTable) {
+                $join->on("$tableName.product_id", '=', "$productsTable.product_id")
+                     ->on("$tableName.installation_id", '=', "$productsTable.installation_id");
+            })
+            ->where("$tableName.user_id", $amemberUserId)
+            ->where("$tableName.status", 'active')
+            ->where(function ($q) use ($tableName) {
+                $q->whereNull("$tableName.expire_date")
+                  ->orWhere("$tableName.expire_date", '>', now());
+            })
+            ->whereNotNull("$productsTable.tier");
+
+        if ($installationId) {
+            $query->where("$tableName.installation_id", $installationId);
+        }
+
+        return $query->orderBy("$productsTable.sort_order", 'desc')
+            ->value("$productsTable.tier");
+    }
+
+    /**
+     * Check if user has feature access based on product features.
+     */
+    public function hasFeatureAccess(string $amemberUserId, string $feature, $installationId = null): bool
+    {
+        $tableName = config('amember-sso.tables.subscriptions');
+        $productsTable = config('amember-sso.tables.products');
+
+        $query = \Illuminate\Support\Facades\DB::table($tableName)
+            ->join($productsTable, function ($join) use ($tableName, $productsTable) {
+                $join->on("$tableName.product_id", '=', "$productsTable.product_id")
+                     ->on("$tableName.installation_id", '=', "$productsTable.installation_id");
+            })
+            ->where("$tableName.user_id", $amemberUserId)
+            ->where("$tableName.status", 'active')
+            ->where(function ($q) use ($tableName) {
+                $q->whereNull("$tableName.expire_date")
+                  ->orWhere("$tableName.expire_date", '>', now());
+            });
+
+        if ($installationId) {
+            $query->where("$tableName.installation_id", $installationId);
+        }
+
+        $products = $query->get(["$productsTable.features"]);
+
+        foreach ($products as $product) {
+            $features = json_decode($product->features, true) ?? [];
+            if (isset($features[$feature]) && $features[$feature]) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Get feature value from user's products (returns highest/best value).
+     */
+    public function getFeatureValue(string $amemberUserId, string $feature, $installationId = null, $default = null)
+    {
+        $tableName = config('amember-sso.tables.subscriptions');
+        $productsTable = config('amember-sso.tables.products');
+
+        $query = \Illuminate\Support\Facades\DB::table($tableName)
+            ->join($productsTable, function ($join) use ($tableName, $productsTable) {
+                $join->on("$tableName.product_id", '=', "$productsTable.product_id")
+                     ->on("$tableName.installation_id", '=', "$productsTable.installation_id");
+            })
+            ->where("$tableName.user_id", $amemberUserId)
+            ->where("$tableName.status", 'active')
+            ->where(function ($q) use ($tableName) {
+                $q->whereNull("$tableName.expire_date")
+                  ->orWhere("$tableName.expire_date", '>', now());
+            })
+            ->orderBy("$productsTable.sort_order", 'desc');
+
+        if ($installationId) {
+            $query->where("$tableName.installation_id", $installationId);
+        }
+
+        $products = $query->get(["$productsTable.features"]);
+
+        $values = [];
+        foreach ($products as $product) {
+            $features = json_decode($product->features, true) ?? [];
+            if (isset($features[$feature])) {
+                $values[] = $features[$feature];
+            }
+        }
+
+        if (empty($values)) {
+            return $default;
+        }
+
+        // Return highest numeric value, or first non-null for other types
+        if (is_numeric($values[0])) {
+            return max($values);
+        }
+
+        return $values[0];
+    }
 }
