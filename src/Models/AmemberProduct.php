@@ -4,6 +4,7 @@ namespace Greatplr\AmemberSso\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
 
 class AmemberProduct extends Model
 {
@@ -15,6 +16,8 @@ class AmemberProduct extends Model
         'tier',
         'display_name',
         'slug',
+        'mappable_type',
+        'mappable_id',
         'features',
         'price',
         'currency',
@@ -51,6 +54,14 @@ class AmemberProduct extends Model
             config('amember-sso.models.installation', AmemberInstallation::class),
             'installation_id'
         );
+    }
+
+    /**
+     * Get the mapped model (polymorphic).
+     */
+    public function mappable(): MorphTo
+    {
+        return $this->morphTo();
     }
 
     /**
@@ -158,5 +169,41 @@ class AmemberProduct extends Model
     public function getDisplayNameAttribute($value): string
     {
         return $value ?? $this->title ?? "Product {$this->product_id}";
+    }
+
+    /**
+     * Scope: Filter by mappable model.
+     */
+    public function scopeForMappable($query, string $type, $id)
+    {
+        return $query->where('mappable_type', $type)
+            ->where('mappable_id', $id);
+    }
+
+    /**
+     * Find products by mappable model.
+     */
+    public static function findByMappable(string $type, $id, $installationId = null): \Illuminate\Database\Eloquent\Collection
+    {
+        $query = static::where('mappable_type', $type)
+            ->where('mappable_id', $id);
+
+        if ($installationId) {
+            $query->where('installation_id', $installationId);
+        }
+
+        return $query->get();
+    }
+
+    /**
+     * Check if this product is mapped to a specific model.
+     */
+    public function isMappedTo(string $type, $id = null): bool
+    {
+        if ($id === null) {
+            return $this->mappable_type === $type;
+        }
+
+        return $this->mappable_type === $type && $this->mappable_id == $id;
     }
 }

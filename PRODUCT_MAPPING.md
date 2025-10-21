@@ -422,6 +422,302 @@ public function pricing()
 </div>
 ```
 
+## Polymorphic Product Mapping
+
+For complex applications where aMember products grant access to **specific resources** (like courses, ebooks, memberships), use polymorphic mapping.
+
+### Why Polymorphic?
+
+**Tier-based is great for:**
+- Simple subscription tiers (Basic, Premium, Enterprise)
+- Feature flags (can_use_api, max_users)
+- Pricing pages
+
+**Polymorphic is essential for:**
+- **Multi-resource access**: Product grants Course + Ebook + Membership
+- **Specific model access**: Product 5 = Access to Course #42
+- **Complex apps**: LinkController, LMS, content platforms
+- **Existing models**: Map to existing Subscription, Plan, Course models
+
+### Database Setup
+
+The migration already includes polymorphic fields:
+
+```php
+$table->string('mappable_type')->nullable();  // Model class: 'App\Models\Course'
+$table->unsignedBigInteger('mappable_id')->nullable();  // Model ID: 42
+```
+
+You can use **both tier AND polymorphic** on the same product:
+- `tier` = 'premium' (for general access checks)
+- `mappable_type` + `mappable_id` = specific resource granted
+
+### Example: LinkController Use Case
+
+**Scenario**: aMember Product 5 grants access to:
+- Course #42
+- Ebook #18
+- Membership Role #3
+
+```php
+use Greatplr\AmemberSso\Models\AmemberProduct;
+use Greatplr\AmemberSso\Models\AmemberInstallation;
+
+$installation = AmemberInstallation::where('slug', 'main')->first();
+
+// Product 5 grants Course access
+AmemberProduct::create([
+    'installation_id' => $installation->id,
+    'product_id' => '5',
+    'mappable_type' => 'App\Models\Course',
+    'mappable_id' => 42,
+    'tier' => 'premium',  // Still useful for tier-based checks
+    'display_name' => 'Premium Course Bundle',
+]);
+
+// Product 5 ALSO grants Ebook access
+AmemberProduct::create([
+    'installation_id' => $installation->id,
+    'product_id' => '5',
+    'mappable_type' => 'App\Models\Ebook',
+    'mappable_id' => 18,
+    'tier' => 'premium',
+    'display_name' => 'Bonus Ebook Access',
+]);
+
+// Product 5 ALSO grants Membership role
+AmemberProduct::create([
+    'installation_id' => $installation->id,
+    'product_id' => '5',
+    'mappable_type' => 'App\Models\Role',
+    'mappable_id' => 3,
+    'tier' => 'premium',
+    'display_name' => 'Premium Member Role',
+]);
+```
+
+**Important**: One aMember product can map to **multiple resources** by creating multiple `AmemberProduct` records with different `mappable_type` and `mappable_id` but same `product_id`.
+
+### Checking Access to Specific Models
+
+```php
+use Greatplr\AmemberSso\Facades\AmemberSso;
+
+$amemberUserId = auth()->user()->amember_user_id;
+
+// Check if user has access to Course #42
+if (AmemberSso::hasMappableAccess($amemberUserId, 'App\Models\Course', 42)) {
+    // User can access this specific course
+}
+
+// Check if user has access to Ebook #18
+if (AmemberSso::hasMappableAccess($amemberUserId, 'App\Models\Ebook', 18)) {
+    // User can access this specific ebook
+}
+
+// Check if user has access to ANY course
+if (AmemberSso::hasAnyMappableTypeAccess($amemberUserId, 'App\Models\Course')) {
+    // User has access to at least one course
+}
+```
+
+### Get All Accessible Models
+
+```php
+use Greatplr\AmemberSso\Facades\AmemberSso;
+
+$amemberUserId = auth()->user()->amember_user_id;
+
+// Get all courses user has access to
+$courses = AmemberSso::getUserMappables($amemberUserId, 'App\Models\Course');
+
+foreach ($courses as $course) {
+    echo $course->title . "\n";
+}
+
+// Get ALL mappable models (courses, ebooks, roles, etc.)
+$allAccess = AmemberSso::getUserMappables($amemberUserId);
+// Returns collection of mixed models
+```
+
+### Working with Model Relationships
+
+Add a method to your Course model:
+
+```php
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+
+class Course extends Model
+{
+    /**
+     * Get aMember products that grant access to this course.
+     */
+    public function amemberProducts()
+    {
+        return \Greatplr\AmemberSso\Models\AmemberProduct::where('mappable_type', self::class)
+            ->where('mappable_id', $this->id)
+            ->get();
+    }
+
+    /**
+     * Check if a specific aMember user has access.
+     */
+    public function hasUserAccess(string $amemberUserId): bool
+    {
+        return \Greatplr\AmemberSso\Facades\AmemberSso::hasMappableAccess(
+            $amemberUserId,
+            self::class,
+            $this->id
+        );
+    }
+}
+```
+
+Usage:
+
+```php
+$course = Course::find(42);
+
+// Check if user has access
+if ($course->hasUserAccess(auth()->user()->amember_user_id)) {
+    // Show course content
+}
+
+// See which aMember products grant access
+$products = $course->amemberProducts();
+// Returns: AmemberProduct collection
+```
+
+### Middleware for Polymorphic Access
+
+```php
+// app/Http/Middleware/CheckMappableAccess.php
+namespace App\Http\Middleware;
+
+use Closure;
+use Illuminate\Http\Request;
+use Greatplr\AmemberSso\Facades\AmemberSso;
+
+class CheckMappableAccess
+{
+    public function handle(Request $request, Closure $next, string $type, string $idParam = 'id')
+    {
+        $user = $request->user();
+
+        if (!$user || !$user->amember_user_id) {
+            return redirect('/login');
+        }
+
+        $modelId = $request->route($idParam);
+
+        if (!AmemberSso::hasMappableAccess($user->amember_user_id, $type, $modelId)) {
+            abort(403, "You don't have access to this resource");
+        }
+
+        return $next($request);
+    }
+}
+```
+
+Register in `app/Http/Kernel.php`:
+
+```php
+protected $middlewareAliases = [
+    'mappable' => \App\Http\Middleware\CheckMappableAccess::class,
+];
+```
+
+Use in routes:
+
+```php
+Route::get('/courses/{id}', function ($id) {
+    $course = Course::findOrFail($id);
+    return view('courses.show', compact('course'));
+})->middleware('mappable:App\Models\Course,id');
+
+Route::get('/ebooks/{ebook}', function ($ebook) {
+    return view('ebooks.show', compact('ebook'));
+})->middleware('mappable:App\Models\Ebook,ebook');
+```
+
+### Combining Tier and Polymorphic
+
+Use **both** patterns in the same application:
+
+```php
+// Tier-based: General access levels
+if (AmemberSso::hasTierAccess($amemberUserId, 'premium')) {
+    // Can use API, premium support, etc.
+}
+
+// Polymorphic: Specific resource access
+if (AmemberSso::hasMappableAccess($amemberUserId, 'App\Models\Course', 42)) {
+    // Can access this specific course
+}
+
+// Feature-based: Capability checks
+if (AmemberSso::hasFeatureAccess($amemberUserId, 'can_download_videos')) {
+    // Show download button
+}
+```
+
+### Events Include Product Mapping
+
+All subscription events now include the product mapping:
+
+```php
+use Greatplr\AmemberSso\Events\SubscriptionAdded;
+
+class HandleNewSubscription
+{
+    public function handle(SubscriptionAdded $event)
+    {
+        $subscription = $event->subscription;
+        $productMapping = $event->productMapping;  // AmemberProduct model
+
+        if ($productMapping && $productMapping->mappable_type === 'App\Models\Course') {
+            $course = $productMapping->mappable;
+
+            // Grant user access to course
+            Log::info("User gained access to course: {$course->title}");
+        }
+    }
+}
+```
+
+### Testing with Polymorphic
+
+```php
+use Greatplr\AmemberSso\Facades\AmemberSso;
+use Greatplr\AmemberSso\Models\AmemberProduct;
+
+// Create test product mapping
+$product = AmemberProduct::create([
+    'installation_id' => $installation->id,
+    'product_id' => '5',
+    'mappable_type' => 'App\Models\Course',
+    'mappable_id' => 42,
+    'tier' => 'premium',
+]);
+
+// Fake webhook
+AmemberSso::fakeEvents();
+
+$webhookData = AmemberSso::fakeWebhook('accessAfterInsert', [
+    'access' => [
+        'product_id' => '5',
+        'user_id' => '100',
+    ],
+]);
+
+// Process webhook and assert
+AmemberSso::assertSubscriptionAdded(function ($event) {
+    return $event->productMapping->mappable_type === 'App\Models\Course';
+});
+```
+
 ## Best Practices
 
 ### 1. **Use Tiers for Major Plans**

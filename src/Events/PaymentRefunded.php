@@ -2,17 +2,15 @@
 
 namespace Greatplr\AmemberSso\Events;
 
-use Greatplr\AmemberSso\Models\AmemberProduct;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-class SubscriptionAdded
+class PaymentRefunded
 {
     use Dispatchable, SerializesModels;
 
     public function __construct(
-        public array $subscription,
-        public array $rawData,
-        public ?AmemberProduct $productMapping = null
+        public array $payment,
+        public array $rawData
     ) {}
 }

@@ -659,4 +659,112 @@ class AmemberSsoService
 
         return $values[0];
     }
+
+    /**
+     * Get user's mappable models (polymorphic).
+     * Returns collection of models that user has access to.
+     */
+    public function getUserMappables(string $amemberUserId, ?string $mappableType = null, $installationId = null): \Illuminate\Support\Collection
+    {
+        $tableName = config('amember-sso.tables.subscriptions');
+        $productsTable = config('amember-sso.tables.products');
+
+        $query = \Illuminate\Support\Facades\DB::table($tableName)
+            ->join($productsTable, function ($join) use ($tableName, $productsTable) {
+                $join->on("$tableName.product_id", '=', "$productsTable.product_id")
+                     ->on("$tableName.installation_id", '=', "$productsTable.installation_id");
+            })
+            ->where("$tableName.user_id", $amemberUserId)
+            ->where("$tableName.status", 'active')
+            ->where(function ($q) use ($tableName) {
+                $q->whereNull("$tableName.expire_date")
+                  ->orWhere("$tableName.expire_date", '>', now());
+            })
+            ->whereNotNull("$productsTable.mappable_type")
+            ->whereNotNull("$productsTable.mappable_id");
+
+        if ($mappableType) {
+            $query->where("$productsTable.mappable_type", $mappableType);
+        }
+
+        if ($installationId) {
+            $query->where("$tableName.installation_id", $installationId);
+        }
+
+        $results = $query->get(["$productsTable.mappable_type", "$productsTable.mappable_id"]);
+
+        return $results->map(function ($item) {
+            $modelClass = $item->mappable_type;
+            if (class_exists($modelClass)) {
+                return $modelClass::find($item->mappable_id);
+            }
+            return null;
+        })->filter();
+    }
+
+    /**
+     * Check if user has access to a specific mappable model.
+     */
+    public function hasMappableAccess(string $amemberUserId, string $mappableType, $mappableId, $installationId = null): bool
+    {
+        $tableName = config('amember-sso.tables.subscriptions');
+        $productsTable = config('amember-sso.tables.products');
+
+        $query = \Illuminate\Support\Facades\DB::table($tableName)
+            ->join($productsTable, function ($join) use ($tableName, $productsTable) {
+                $join->on("$tableName.product_id", '=', "$productsTable.product_id")
+                     ->on("$tableName.installation_id", '=', "$productsTable.installation_id");
+            })
+            ->where("$tableName.user_id", $amemberUserId)
+            ->where("$tableName.status", 'active')
+            ->where(function ($q) use ($tableName) {
+                $q->whereNull("$tableName.expire_date")
+                  ->orWhere("$tableName.expire_date", '>', now());
+            })
+            ->where("$productsTable.mappable_type", $mappableType)
+            ->where("$productsTable.mappable_id", $mappableId);
+
+        if ($installationId) {
+            $query->where("$tableName.installation_id", $installationId);
+        }
+
+        return $query->exists();
+    }
+
+    /**
+     * Get product mappings for a specific mappable model.
+     */
+    public function getProductsForMappable(string $mappableType, $mappableId, $installationId = null): \Illuminate\Database\Eloquent\Collection
+    {
+        return \Greatplr\AmemberSso\Models\AmemberProduct::findByMappable($mappableType, $mappableId, $installationId);
+    }
+
+    /**
+     * Check if user has access to ANY model of a specific type.
+     * Example: Check if user has access to any Course.
+     */
+    public function hasAnyMappableTypeAccess(string $amemberUserId, string $mappableType, $installationId = null): bool
+    {
+        $tableName = config('amember-sso.tables.subscriptions');
+        $productsTable = config('amember-sso.tables.products');
+
+        $query = \Illuminate\Support\Facades\DB::table($tableName)
+            ->join($productsTable, function ($join) use ($tableName, $productsTable) {
+                $join->on("$tableName.product_id", '=', "$productsTable.product_id")
+                     ->on("$tableName.installation_id", '=', "$productsTable.installation_id");
+            })
+            ->where("$tableName.user_id", $amemberUserId)
+            ->where("$tableName.status", 'active')
+            ->where(function ($q) use ($tableName) {
+                $q->whereNull("$tableName.expire_date")
+                  ->orWhere("$tableName.expire_date", '>', now());
+            })
+            ->where("$productsTable.mappable_type", $mappableType);
+
+        if ($installationId) {
+            $query->where("$tableName.installation_id", $installationId);
+        }
+
+        return $query->exists();
+    }
 }

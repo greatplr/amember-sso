@@ -29,6 +29,10 @@ return new class extends Migration
             $table->string('display_name')->nullable(); // e.g., 'Premium Membership'
             $table->string('slug')->nullable(); // URL-friendly identifier
 
+            // Polymorphic mapping (optional - for mapping to specific models)
+            $table->string('mappable_type')->nullable(); // e.g., 'App\Models\Course'
+            $table->unsignedBigInteger('mappable_id')->nullable(); // ID of the mapped model
+
             // Feature flags (JSON for flexibility)
             $table->json('features')->nullable(); // e.g., {"can_use_api": true, "max_users": 10}
 
@@ -53,6 +57,7 @@ return new class extends Migration
             // Index for common queries
             $table->index(['installation_id', 'tier']);
             $table->index(['installation_id', 'is_active']);
+            $table->index(['mappable_type', 'mappable_id']);
         });
     }
 

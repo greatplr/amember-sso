@@ -2,10 +2,15 @@
 
 namespace Greatplr\AmemberSso\Jobs;
 
+use Greatplr\AmemberSso\Events\PaymentReceived;
+use Greatplr\AmemberSso\Events\PaymentRefunded;
 use Greatplr\AmemberSso\Events\SubscriptionAdded;
 use Greatplr\AmemberSso\Events\SubscriptionDeleted;
 use Greatplr\AmemberSso\Events\SubscriptionUpdated;
+use Greatplr\AmemberSso\Events\UserCreated;
+use Greatplr\AmemberSso\Events\UserUpdated;
 use Greatplr\AmemberSso\Models\AmemberInstallation;
+use Greatplr\AmemberSso\Models\AmemberProduct;
 use Greatplr\AmemberSso\Services\AmemberSsoService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -24,26 +29,29 @@ class ProcessAmemberWebhook implements ShouldQueue
     /**
      * The number of times the job may be attempted.
      */
-    public int $tries = 3;
+    public int $tries;
 
     /**
      * The number of seconds to wait before retrying.
      */
-    public int $backoff = 60;
+    public int $backoff;
 
     /**
-     * Delete the job if its models no longer exist.
-     */
-    public bool $deleteWhenMissingModels = true;
-
-    /**
-     * Create a new job instance.
+     * Initialize retry configuration from config.
      */
     public function __construct(
         public string $eventType,
         public array $payload,
         public AmemberInstallation $installation
-    ) {}
+    ) {
+        $this->tries = config('amember-sso.webhook.max_retries', 3);
+        $this->backoff = config('amember-sso.webhook.retry_delay', 60);
+    }
+
+    /**
+     * Delete the job if its models no longer exist.
+     */
+    public bool $deleteWhenMissingModels = true;
 
     /**
      * Execute the job.
@@ -153,9 +161,15 @@ class ProcessAmemberWebhook implements ShouldQueue
 
             $this->clearUserCache($userData);
 
+            // Get product mapping
+            $productMapping = AmemberProduct::findByAmemberProduct(
+                $accessData['product_id'] ?? null,
+                $this->installation->id
+            );
+
             DB::commit();
 
-            event(new SubscriptionAdded($subscription, $this->payload));
+            event(new SubscriptionAdded($subscription, $this->payload, $productMapping));
 
             Log::info('Access record created via webhook', [
                 'user_id' => $user->id,
@@ -185,9 +199,15 @@ class ProcessAmemberWebhook implements ShouldQueue
 
             $this->clearUserCache($userData);
 
+            // Get product mapping
+            $productMapping = AmemberProduct::findByAmemberProduct(
+                $accessData['product_id'] ?? null,
+                $this->installation->id
+            );
+
             DB::commit();
 
-            event(new SubscriptionUpdated($subscription, $this->payload));
+            event(new SubscriptionUpdated($subscription, $this->payload, $productMapping));
         } catch (\Exception $e) {
             DB::rollBack();
             throw $e;
@@ -203,6 +223,12 @@ class ProcessAmemberWebhook implements ShouldQueue
         $userData = $this->payload['user'] ?? [];
         $tableName = config('amember-sso.tables.subscriptions');
 
+        // Get product mapping before deletion
+        $productMapping = AmemberProduct::findByAmemberProduct(
+            $accessData['product_id'] ?? null,
+            $this->installation->id
+        );
+
         DB::table($tableName)
             ->where('access_id', $accessData['access_id'] ?? null)
             ->where('installation_id', $this->installation->id)
@@ -210,7 +236,7 @@ class ProcessAmemberWebhook implements ShouldQueue
 
         $this->clearUserCache($userData);
 
-        event(new SubscriptionDeleted($this->payload));
+        event(new SubscriptionDeleted($this->payload, $productMapping));
     }
 
     /**
@@ -220,6 +246,8 @@ class ProcessAmemberWebhook implements ShouldQueue
     {
         $paymentData = $this->payload['payment'] ?? [];
         $userData = $this->payload['user'] ?? [];
+
+        event(new PaymentReceived($paymentData, $this->payload));
 
         Log::info('Payment received via webhook', [
             'installation' => $this->installation->name,
@@ -238,6 +266,8 @@ class ProcessAmemberWebhook implements ShouldQueue
     {
         $refundData = $this->payload['refund'] ?? [];
         $userData = $this->payload['user'] ?? [];
+
+        event(new PaymentRefunded($refundData, $this->payload));
 
         Log::info('Payment refunded via webhook', [
             'installation' => $this->installation->name,
@@ -260,6 +290,8 @@ class ProcessAmemberWebhook implements ShouldQueue
             $user = $this->findOrCreateUser($userData);
 
             DB::commit();
+
+            event(new UserCreated($user, $this->payload));
 
             Log::info('User created via webhook', [
                 'user_id' => $user->id,
@@ -294,6 +326,10 @@ class ProcessAmemberWebhook implements ShouldQueue
             $this->clearUserCache($userData);
 
             DB::commit();
+
+            if ($user) {
+                event(new UserUpdated($user, $this->payload));
+            }
         } catch (\Exception $e) {
             DB::rollBack();
             throw $e;

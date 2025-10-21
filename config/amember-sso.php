@@ -72,6 +72,11 @@ return [
         'use_queue' => env('AMEMBER_WEBHOOK_USE_QUEUE', true),
         'queue_name' => env('AMEMBER_WEBHOOK_QUEUE', 'amember-webhooks'),
 
+        // Retry Configuration
+        'retry_failed' => env('AMEMBER_WEBHOOK_RETRY_FAILED', true),
+        'max_retries' => env('AMEMBER_WEBHOOK_MAX_RETRIES', 3),
+        'retry_delay' => env('AMEMBER_WEBHOOK_RETRY_DELAY', 60), // seconds
+
         // Events to listen for (aMember uses camelCase event names)
         'events' => [
             'subscriptionAdded',       // User gets new product subscription
@@ -103,6 +108,32 @@ return [
         'sync_user_data' => env('AMEMBER_SYNC_USER_DATA', true),
 
         // Fields to sync from aMember to local user
+        'syncable_fields' => [
+            'email',
+            'name_f',
+            'name_l',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | User Creation
+    |--------------------------------------------------------------------------
+    |
+    | Configure automatic user creation from webhooks.
+    |
+    */
+    'user_creation' => [
+        // Automatically create users from webhooks
+        'enabled' => env('AMEMBER_USER_CREATION_ENABLED', true),
+
+        // Default password for created users ('random' = generate random password)
+        'default_password' => env('AMEMBER_USER_DEFAULT_PASSWORD', 'random'),
+
+        // Send email verification
+        'send_verification' => env('AMEMBER_USER_SEND_VERIFICATION', false),
+
+        // Fields to sync when creating user
         'syncable_fields' => [
             'email',
             'name_f',
