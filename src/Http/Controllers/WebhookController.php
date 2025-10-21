@@ -151,14 +151,23 @@ class WebhookController extends Controller
      * Handle accessAfterInsert event (actual access record created).
      * Payload: access[], user[]
      * This is the MAIN event for creating subscriptions.
+     *
+     * Example payload (after Laravel parsing):
+     * access[access_id] => ['access' => ['access_id' => '3911', 'product_id' => '50', ...]]
+     * user[user_id] => ['user' => ['user_id' => '1977', 'email' => 'user@example.com', ...]]
      */
     protected function handleAccessAfterInsert(Request $request, AmemberInstallation $installation): void
     {
         DB::beginTransaction();
 
         try {
+            // Laravel automatically parses bracket notation into nested arrays
             $accessData = $request->input('access', []);
             $userData = $request->input('user', []);
+
+            if (empty($accessData) || empty($userData)) {
+                throw new \Exception('Missing access or user data in webhook payload');
+            }
 
             // Find or create user
             $user = $this->findOrCreateUser($userData, $installation);

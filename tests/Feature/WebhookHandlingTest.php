@@ -69,25 +69,35 @@ class WebhookHandlingTest extends TestCase
     /** @test */
     public function it_handles_access_after_insert_webhook()
     {
+        // Test with real payload structure from aMember 6.3.35 (anonymized)
         $response = $this->post('/amember/webhook', [
             'am-webhooks-version' => '1.0',
             'am-event' => 'accessAfterInsert',
-            'am-timestamp' => now()->toIso8601String(),
-            'am-root-url' => 'https://example.com/amember',
+            'am-timestamp' => '2025-10-20T18:37:07-06:00',
+            'am-root-url' => 'https://example.com/members',
             'access' => [
-                'access_id' => 12345,
-                'user_id' => 123,
-                'product_id' => 5,
-                'begin_date' => '2025-01-01',
-                'expire_date' => '2026-01-01',
-                'invoice_id' => 9876,
+                'access_id' => '3911',
+                'invoice_id' => '3053',
+                'invoice_public_id' => 'DG9J5',
+                'invoice_payment_id' => '3431',
+                'invoice_item_id' => '3058',
+                'user_id' => '1977',
+                'product_id' => '50',
+                'transaction_id' => '5T409668ET921644V',
+                'begin_date' => '2025-10-20',
+                'expire_date' => '2037-12-31',
+                'qty' => '1',
             ],
             'user' => [
-                'user_id' => 123,
-                'email' => 'test@example.com',
-                'login' => 'testuser',
+                'user_id' => '1977',
+                'login' => 'johndoe',
+                'email' => 'john@example.com',
                 'name_f' => 'John',
                 'name_l' => 'Doe',
+                'country' => 'US',
+                'status' => '0',
+                'is_approved' => '1',
+                'is_locked' => '0',
             ],
         ], [
             'REMOTE_ADDR' => '127.0.0.1',
@@ -95,12 +105,22 @@ class WebhookHandlingTest extends TestCase
 
         $response->assertStatus(200);
 
+        // Verify user was created
+        $this->assertDatabaseHas('users', [
+            'email' => 'john@example.com',
+            'name' => 'John Doe',
+            'amember_user_id' => '1977',
+            'amember_installation_id' => $this->installation->id,
+        ]);
+
         // Verify subscription was created
         $this->assertDatabaseHas('amember_subscriptions', [
-            'access_id' => 12345,
-            'user_id' => 123,
-            'product_id' => 5,
+            'access_id' => '3911',
+            'user_id' => '1977',
+            'product_id' => '50',
             'installation_id' => $this->installation->id,
+            'begin_date' => '2025-10-20',
+            'expire_date' => '2037-12-31',
         ]);
     }
 

@@ -100,17 +100,17 @@ Based on aMember source code analysis:
 am-webhooks-version: 1.0
 am-event: subscriptionDeleted
 am-timestamp: 2025-10-21T00:21:16+00:00
-am-root-url: http://innerprofitcircle.com/member
+am-root-url: https://example.com/members
 
 user[user_id]: 1048
-user[login]: 981chartley
-user[email]: 981chartley@gmail.com
-user[name_f]: Mike
-user[name_l]: Hartley
+user[login]: johndoe
+user[email]: john@example.com
+user[name_f]: John
+user[name_l]: Doe
 user[state]:
 user[country]: US
 user[added]: 2025-07-20 23:08:23
-user[remote_addr]: 216.229.19.135
+user[remote_addr]: 192.0.2.1
 user[status]: 2
 user[unsubscribed]: 0
 user[email_confirmed]: 0
@@ -118,19 +118,19 @@ user[i_agree]: 0
 user[is_approved]: 1
 user[is_locked]: 0
 user[last_login]: 2025-08-12 22:07:09
-user[last_ip]: 8.44.158.150
+user[last_ip]: 192.0.2.2
 user[last_user_agent]: Mozilla/5.0...
 user[subusers_parent_id]: 0
 user[phone_confirmed]: 0
 user[mobile_confirmed]: 0
-user[data.external_id]: 981chartleygmailcom
+user[data.external_id]: johndoeexamplecom
 user[data.need_session_refresh]: 1
 user[data.signup_email_sent]: 1
 
 product[product_id]: 31
-product[title]: Inner Profit Circle Member Hosting
-product[description]: Website Hosting for Real Web Properties...
-product[url]: https://clients.hubseek.com
+product[title]: Premium Membership
+product[description]: Full access to premium features
+product[url]: https://example.com
 product[start_date]: product,group,payment
 product[tax_group]: -1
 product[tax_digital]: 0
@@ -174,28 +174,52 @@ product[description]: Full access to all features
 
 ### accessAfterInsert Event
 
-**Expected structure:**
+**Real example from aMember 6.3.35 (anonymized):**
 
 ```
+Content-Type: application/x-www-form-urlencoded
+User-Agent: aMember PRO/6.3.35 (https://www.amember.com)
+
 am-webhooks-version: 1.0
 am-event: accessAfterInsert
-am-timestamp: 2025-10-21T01:00:00+00:00
-am-root-url: http://example.com/member
+am-timestamp: 2025-10-20T18:37:07-06:00
+am-root-url: https://example.com/members
 
-access[access_id]: 12345
-access[user_id]: 1050
-access[product_id]: 5
-access[begin_date]: 2025-01-01
-access[expire_date]: 2026-01-01
-access[invoice_id]: 9876
-access[invoice_item_id]: 5432
+access[access_id]: 3911
+access[invoice_id]: 3053
+access[invoice_public_id]: DG9J5
+access[invoice_payment_id]: 3431
+access[invoice_item_id]: 3058
+access[user_id]: 1977
+access[product_id]: 50
+access[transaction_id]: 5T409668ET921644V
+access[begin_date]: 2025-10-20
+access[expire_date]: 2037-12-31
+access[qty]: 1
 
-user[user_id]: 1050
+user[user_id]: 1977
+user[login]: johndoe
+user[pass]: $P$B0YRy6lJMeFmTqwW1r3VOQqhxs71cu0
+user[pass_dattm]: 2025-10-20 18:37:06
 user[email]: john@example.com
 user[name_f]: John
 user[name_l]: Doe
-...
+user[state]: CA
+user[country]: US
+user[added]: 2025-10-20 18:37:06
+user[remote_addr]: 192.0.2.1
+user[status]: 0
+user[unsubscribed]: 0
+user[i_agree]: 0
+user[is_approved]: 1
+user[is_locked]: 0
+user[email_confirmed]: 0
+user[subusers_parent_id]: 0
+user[mobile_confirmed]: 0
+user[data.external_id]: johndoeexamplecom
 ```
+
+**Note:** This is the MAIN event for creating subscriptions. It includes the full access record with dates, invoice information, and complete user data.
 
 ### paymentAfterInsert Event
 
@@ -235,22 +259,36 @@ items[0][first_price]: 99.00
 
 ### Understanding the Format
 
-aMember sends data as **form-encoded** with bracket notation. Laravel automatically parses this into nested arrays.
+aMember sends data as **form-encoded** (`application/x-www-form-urlencoded`) with bracket notation. Laravel automatically parses this into nested arrays.
 
-**Raw POST data:**
+**Raw POST data (what aMember sends):**
 ```
-user[email]=test@example.com&user[user_id]=123
+access[access_id]=3911&access[product_id]=50&user[user_id]=1977&user[email]=test@example.com
 ```
 
-**Laravel receives:**
+**What Laravel receives (automatically parsed):**
 ```php
 $request->all() = [
+    'am-webhooks-version' => '1.0',
+    'am-event' => 'accessAfterInsert',
+    'am-timestamp' => '2025-10-20T18:37:07-06:00',
+    'access' => [
+        'access_id' => '3911',
+        'product_id' => '50',
+        'user_id' => '1977',
+        'begin_date' => '2025-10-20',
+        'expire_date' => '2037-12-31',
+    ],
     'user' => [
+        'user_id' => '1977',
         'email' => 'test@example.com',
-        'user_id' => 123
+        'name_f' => 'michael',
+        'name_l' => 'mack',
     ]
 ]
 ```
+
+**Important:** You don't need to manually parse the bracket notation - Laravel does it automatically!
 
 ### Accessing Data
 
