@@ -153,7 +153,7 @@ class AmemberSsoTestHelper
     /**
      * Assert that a subscription event was dispatched.
      */
-    public static function assertSubscriptionAdded(callable $callback = null): void
+    public static function assertSubscriptionAdded(?callable $callback = null): void
     {
         Event::assertDispatched(\Greatplr\AmemberSso\Events\SubscriptionAdded::class, $callback);
     }
@@ -161,7 +161,7 @@ class AmemberSsoTestHelper
     /**
      * Assert that a subscription updated event was dispatched.
      */
-    public static function assertSubscriptionUpdated(callable $callback = null): void
+    public static function assertSubscriptionUpdated(?callable $callback = null): void
     {
         Event::assertDispatched(\Greatplr\AmemberSso\Events\SubscriptionUpdated::class, $callback);
     }
@@ -169,7 +169,7 @@ class AmemberSsoTestHelper
     /**
      * Assert that a subscription deleted event was dispatched.
      */
-    public static function assertSubscriptionDeleted(callable $callback = null): void
+    public static function assertSubscriptionDeleted(?callable $callback = null): void
     {
         Event::assertDispatched(\Greatplr\AmemberSso\Events\SubscriptionDeleted::class, $callback);
     }
@@ -177,7 +177,7 @@ class AmemberSsoTestHelper
     /**
      * Assert that a user created event was dispatched.
      */
-    public static function assertUserCreated(callable $callback = null): void
+    public static function assertUserCreated(?callable $callback = null): void
     {
         Event::assertDispatched(\Greatplr\AmemberSso\Events\UserCreated::class, $callback);
     }
@@ -185,7 +185,7 @@ class AmemberSsoTestHelper
     /**
      * Assert that a user updated event was dispatched.
      */
-    public static function assertUserUpdated(callable $callback = null): void
+    public static function assertUserUpdated(?callable $callback = null): void
     {
         Event::assertDispatched(\Greatplr\AmemberSso\Events\UserUpdated::class, $callback);
     }
@@ -193,7 +193,7 @@ class AmemberSsoTestHelper
     /**
      * Assert that a payment received event was dispatched.
      */
-    public static function assertPaymentReceived(callable $callback = null): void
+    public static function assertPaymentReceived(?callable $callback = null): void
     {
         Event::assertDispatched(\Greatplr\AmemberSso\Events\PaymentReceived::class, $callback);
     }
@@ -201,7 +201,7 @@ class AmemberSsoTestHelper
     /**
      * Assert that a payment refunded event was dispatched.
      */
-    public static function assertPaymentRefunded(callable $callback = null): void
+    public static function assertPaymentRefunded(?callable $callback = null): void
     {
         Event::assertDispatched(\Greatplr\AmemberSso\Events\PaymentRefunded::class, $callback);
     }

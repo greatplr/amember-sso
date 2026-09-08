@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    # Proves every PHP and Laravel version this package claims to support can
+    # actually install it. A constraint that is declared but never exercised is
+    # how the Laravel 13 block went unnoticed until a consuming application
+    # tried to upgrade and could not.
+    name: PHP ${{ matrix.php }} / Laravel ${{ matrix.laravel }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.3', '8.4']
+        laravel: ['11.*', '12.*', '13.*']
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mbstring, pdo_sqlite, sqlite3
+          coverage: none
+
+      - name: Validate composer.json
+        run: composer validate --strict
+
+      - name: Install against Laravel ${{ matrix.laravel }}
+        run: |
+          composer require \
+            "illuminate/support:${{ matrix.laravel }}" \
+            "illuminate/database:${{ matrix.laravel }}" \
+            "illuminate/http:${{ matrix.laravel }}" \
+            --no-interaction --no-update
+          composer update --prefer-dist --no-interaction --no-progress
+
+      - name: Lint
+        run: find src config database routes -name '*.php' -print0 | xargs -0 -n1 php -l
+
+  # Not yet running the test suite. tests/Feature/WebhookHandlingTest.php
+  # extends the host application's Tests\TestCase, which does not exist inside
+  # a package, so the six tests it contains have never been runnable. Fixing
+  # that needs an Orchestra Testbench base case and a resolution to the
+  # duplicate migration run it currently hits. Add a `tests` job here once the
+  # harness works, so this file stops being the only gate.
