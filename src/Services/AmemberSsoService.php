@@ -2,12 +2,19 @@
 
 namespace Greatplr\AmemberSso\Services;
 
+use Greatplr\AmemberSso\Api\AmemberApiClient;
+use Greatplr\AmemberSso\Api\AmemberApiException;
+use Greatplr\AmemberSso\Models\AmemberInstallation;
+use Greatplr\AmemberSso\Support\UserDataSync;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
-use Plutuss\AMember\Facades\AMember;
-use Plutuss\AMember\AMemberClient;
 
+/**
+ * Every method that calls aMember's API takes an optional installation as its
+ * last argument: an AmemberInstallation, its id, or null for the default
+ * installation configured in `amember-sso.api` (AMEMBER_URL / AMEMBER_API_KEY).
+ */
 class AmemberSsoService
 {
     protected ?string $secretKey;
@@ -18,95 +25,115 @@ class AmemberSsoService
     }
 
     /**
-     * Check user access by login (email/username).
-     * Uses the aMember check-access API.
+     * API client for an installation, or for the configured default when null.
+     *
+     * @throws AmemberApiException when the default isn't configured
+     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException for an unknown installation id
      */
-    public function checkAccessByLogin(string $login): ?array
+    public function client(AmemberInstallation|int|null $installation = null): AmemberApiClient
     {
-        try {
-            $response = AMemberClient::getInstance()
-                ->setOption('/check-access/by-login', ['login' => $login])
-                ->sendPost();
-
-            if ($response && isset($response['ok']) && $response['ok'] === true) {
-                return $response;
-            }
-
-            $this->logError("Access check failed for login: {$login}");
-            return null;
-        } catch (\Exception $e) {
-            $this->logError("Check access API error: {$e->getMessage()}");
-            return null;
+        if ($installation === null) {
+            return AmemberApiClient::fromConfig();
         }
+
+        if (is_int($installation)) {
+            $installation = AmemberInstallation::findOrFail($installation);
+        }
+
+        return $installation->getApiClient();
     }
 
     /**
-     * Check user access by email.
-     * Uses the aMember check-access API.
+     * Check user access by login (username or email), without a password.
+     * Uses check-access/by-login.
+     *
+     * Returns aMember's response when `ok` is true, otherwise null.
+     * `subscriptions` maps product id => expiry date (Y-m-d).
      */
-    public function checkAccessByEmail(string $email): ?array
+    public function checkAccessByLogin(string $login, AmemberInstallation|int|null $installation = null): ?array
     {
-        try {
-            $response = AMemberClient::getInstance()
-                ->setOption('/check-access/by-email', ['email' => $email])
-                ->sendPost();
-
-            if ($response && isset($response['ok']) && $response['ok'] === true) {
-                return $response;
-            }
-
-            $this->logError("Access check failed for email: {$email}");
-            return null;
-        } catch (\Exception $e) {
-            $this->logError("Check access API error: {$e->getMessage()}");
-            return null;
-        }
+        return $this->checkAccess('by-login', ['login' => $login], "login: {$login}", $installation);
     }
 
     /**
-     * Authenticate user by login and password.
-     * Uses the aMember check-access API.
+     * Check user access by email, without a password.
+     * Uses check-access/by-email.
      */
-    public function authenticateByLoginPass(string $login, string $password, ?string $ip = null): ?array
+    public function checkAccessByEmail(string $email, AmemberInstallation|int|null $installation = null): ?array
+    {
+        return $this->checkAccess('by-email', ['email' => $email], "email: {$email}", $installation);
+    }
+
+    /**
+     * Authenticate a user by login (username or email) and password.
+     * Uses check-access/by-login-pass, or by-login-pass-ip when $ip is given.
+     *
+     * @param string|null $ip The end user's real IP address, never a server
+     *        IP, placeholder or id. aMember writes it to the user's access log
+     *        and, when the number of distinct IPs exceeds its account-sharing
+     *        limit, LOCKS the account. Behind Cloudflare or a proxy, resolve
+     *        the client's real IP first. Pass null if unsure: by-login-pass
+     *        does no IP logging.
+     */
+    public function authenticateByLoginPass(
+        string $login,
+        string $password,
+        ?string $ip = null,
+        AmemberInstallation|int|null $installation = null,
+    ): ?array {
+        $params = ['login' => $login, 'pass' => $password];
+
+        if ($ip) {
+            $params['ip'] = $ip;
+        }
+
+        $response = $this->checkAccess($ip ? 'by-login-pass-ip' : 'by-login-pass', $params, "authentication: {$login}", $installation);
+
+        if ($response) {
+            $this->logInfo("User authenticated: {$login}");
+        }
+
+        return $response;
+    }
+
+    /**
+     * Call a check-access action; null unless aMember answered `ok: true`.
+     */
+    protected function checkAccess(string $action, array $params, string $subject, AmemberInstallation|int|null $installation): ?array
     {
         try {
-            $params = [
-                'login' => $login,
-                'pass' => $password,
-            ];
+            $response = $this->client($installation)->checkAccess($action, $params);
 
-            if ($ip) {
-                $params['ip'] = $ip;
-                $endpoint = '/check-access/by-login-pass-ip';
-            } else {
-                $endpoint = '/check-access/by-login-pass';
-            }
-
-            $response = AMemberClient::getInstance()
-                ->setOption($endpoint, $params)
-                ->sendPost();
-
-            if ($response && isset($response['ok']) && $response['ok'] === true) {
-                $this->logInfo("User authenticated: {$login}");
+            if (($response['ok'] ?? false) === true) {
                 return $response;
             }
 
-            $this->logError("Authentication failed for: {$login}");
+            $this->logError(sprintf(
+                'aMember check-access/%s failed for %s (code %s: %s)',
+                $action,
+                $subject,
+                $response['code'] ?? 'none',
+                $response['msg'] ?? 'no message',
+            ));
+
             return null;
         } catch (\Exception $e) {
-            $this->logError("Authentication API error: {$e->getMessage()}");
+            $this->logApiError("check-access/{$action} for {$subject}", $e);
+
             return null;
         }
     }
 
     /**
      * Generate SSO login URL for a user.
-     * This uses aMember's SSO functionality if configured.
+     *
+     * Uses `amember-sso.sso.login_url` (AMEMBER_LOGIN_URL), or else the
+     * aMember root derived from `amember-sso.api.url` followed by /login.
      */
     public function generateSsoUrl(string $login, ?string $redirectUrl = null): string
     {
         $redirectUrl = $redirectUrl ?? config('amember-sso.sso.redirect_after_login');
-        $amemberUrl = config('amember.url');
+        $loginUrl = $this->defaultLoginUrl();
 
         if ($this->secretKey) {
             // Use signed SSO link
@@ -117,11 +144,22 @@ class AmemberSsoService
             ];
             $params['hash'] = $this->generateHash($params);
 
-            return $amemberUrl . '/login?' . http_build_query($params);
+            return $loginUrl . '?' . http_build_query($params);
         }
 
         // Simple login redirect
-        return $amemberUrl . '/login?amember_redirect_url=' . urlencode($redirectUrl);
+        return $loginUrl . '?amember_redirect_url=' . urlencode($redirectUrl);
+    }
+
+    protected function defaultLoginUrl(): string
+    {
+        if ($loginUrl = config('amember-sso.sso.login_url')) {
+            return rtrim($loginUrl, '/');
+        }
+
+        $apiUrl = rtrim((string) config('amember-sso.api.url'), '/');
+
+        return preg_replace('#/api$#', '', $apiUrl) . '/login';
     }
 
     /**
@@ -129,40 +167,34 @@ class AmemberSsoService
      * This matches the aMember user to local user and logs them in.
      * Does NOT check product access - that's handled by webhooks + local DB.
      */
-    public function loginFromAmember(string $loginOrEmail, bool $isEmail = false): ?object
+    public function loginFromAmember(string $loginOrEmail, bool $isEmail = false, AmemberInstallation|int|null $installation = null): ?object
     {
         try {
             // Verify user exists in aMember
             $accessData = $isEmail
-                ? $this->checkAccessByEmail($loginOrEmail)
-                : $this->checkAccessByLogin($loginOrEmail);
+                ? $this->checkAccessByEmail($loginOrEmail, $installation)
+                : $this->checkAccessByLogin($loginOrEmail, $installation);
 
-            if (!$accessData || !$accessData['ok']) {
+            if (!$accessData) {
                 $this->logError("User not found in aMember: {$loginOrEmail}");
                 return null;
             }
 
-            // Get aMember user ID from response or fetch full user data
-            $amemberUserId = null;
-            $email = null;
+            $amemberUserId = $accessData['user_id'] ?? null;
+            $email = $accessData['email'] ?? ($isEmail ? $loginOrEmail : null);
 
-            // Try to get user_id from access data if available
-            if (isset($accessData['user_id'])) {
-                $amemberUserId = $accessData['user_id'];
-            }
-
-            // Get full user data if needed
-            $amemberUser = $this->getUserByLogin($loginOrEmail);
+            // Full user record, for syncing
+            $amemberUser = $isEmail
+                ? $this->findUser(['email' => $loginOrEmail], $installation)
+                : $this->getUserByLogin($loginOrEmail, $installation);
 
             if ($amemberUser) {
                 $amemberUserId = $amemberUser['user_id'] ?? $amemberUserId;
-                $email = $amemberUser['email'] ?? $loginOrEmail;
-            } else {
-                $email = $isEmail ? $loginOrEmail : null;
+                $email = $amemberUser['email'] ?? $email;
             }
 
             // Find local user - try amember_user_id first, then email
-            $user = $this->findLocalUser($amemberUserId, $email);
+            $user = $this->findLocalUser($amemberUserId !== null ? (int) $amemberUserId : null, $email);
 
             if (!$user) {
                 $this->logError("User not found locally. They need to be created via webhook first: {$loginOrEmail}");
@@ -221,87 +253,70 @@ class AmemberSsoService
     }
 
     /**
-     * Get user from aMember API using the users endpoint.
+     * Get a user record by username from /api/users.
      */
-    public function getUserByLogin(string $login): ?array
+    public function getUserByLogin(string $login, AmemberInstallation|int|null $installation = null): ?array
+    {
+        return $this->findUser(['login' => $login], $installation);
+    }
+
+    /**
+     * Get a user record by aMember user_id from /api/users.
+     */
+    public function getUserById(int $userId, AmemberInstallation|int|null $installation = null): ?array
+    {
+        return $this->findUser(['user_id' => $userId], $installation);
+    }
+
+    /**
+     * First /api/users record matching the filter, or null.
+     */
+    protected function findUser(array $filter, AmemberInstallation|int|null $installation): ?array
     {
         try {
-            $response = AMember::users()
-                ->filter(['login' => $login])
-                ->count(1)
-                ->getUsers();
-
-            // Response is a collection, get first item
-            if ($response && $response->count() > 0) {
-                return $response->first();
-            }
-
-            return null;
+            return $this->client($installation)->list('users', $filter, 1)[0] ?? null;
         } catch (\Exception $e) {
-            $this->logError("Failed to get aMember user: {$e->getMessage()}");
+            $this->logApiError('users lookup', $e);
+
             return null;
         }
     }
 
     /**
-     * Get user by aMember user_id.
-     */
-    public function getUserById(int $userId): ?array
-    {
-        try {
-            $response = AMember::users()
-                ->filter(['user_id' => $userId])
-                ->count(1)
-                ->getUsers();
-
-            if ($response && $response->count() > 0) {
-                return $response->first();
-            }
-
-            return null;
-        } catch (\Exception $e) {
-            $this->logError("Failed to get aMember user: {$e->getMessage()}");
-            return null;
-        }
-    }
-
-    /**
-     * Get user access/subscriptions using check-access API.
+     * Get user access/subscriptions using check-access API (cached when enabled).
      * Returns subscription data with expiration dates.
      */
-    public function getUserAccess(string $loginOrEmail, bool $isEmail = false): ?array
+    public function getUserAccess(string $loginOrEmail, bool $isEmail = false, AmemberInstallation|int|null $installation = null): ?array
     {
-        $cacheKey = "amember_access_" . md5($loginOrEmail);
-
         if (config('amember-sso.access_control.cache_enabled')) {
-            return Cache::remember($cacheKey, config('amember-sso.access_control.cache_ttl'), function () use ($loginOrEmail, $isEmail) {
-                return $this->fetchUserAccess($loginOrEmail, $isEmail);
-            });
+            return Cache::remember(
+                $this->accessCacheKey($loginOrEmail, $installation),
+                config('amember-sso.access_control.cache_ttl'),
+                fn () => $this->fetchUserAccess($loginOrEmail, $isEmail, $installation)
+            );
         }
 
-        return $this->fetchUserAccess($loginOrEmail, $isEmail);
+        return $this->fetchUserAccess($loginOrEmail, $isEmail, $installation);
     }
 
     /**
      * Fetch user access from check-access API.
      */
-    protected function fetchUserAccess(string $loginOrEmail, bool $isEmail = false): ?array
+    protected function fetchUserAccess(string $loginOrEmail, bool $isEmail = false, AmemberInstallation|int|null $installation = null): ?array
     {
-        $accessData = $isEmail
-            ? $this->checkAccessByEmail($loginOrEmail)
-            : $this->checkAccessByLogin($loginOrEmail);
-
-        return $accessData;
+        return $isEmail
+            ? $this->checkAccessByEmail($loginOrEmail, $installation)
+            : $this->checkAccessByLogin($loginOrEmail, $installation);
     }
 
     /**
      * Check if user has access to a specific product.
      * Uses the check-access API which returns active subscriptions.
      */
-    public function hasProductAccess(string $loginOrEmail, int|array $productIds, bool $isEmail = false): bool
+    public function hasProductAccess(string $loginOrEmail, int|array $productIds, bool $isEmail = false, AmemberInstallation|int|null $installation = null): bool
     {
         $productIds = (array) $productIds;
-        $accessData = $this->getUserAccess($loginOrEmail, $isEmail);
+        $accessData = $this->getUserAccess($loginOrEmail, $isEmail, $installation);
 
         if (!$accessData || !isset($accessData['subscriptions'])) {
             return false;
@@ -336,9 +351,9 @@ class AmemberSsoService
     /**
      * Check if user has any active subscription.
      */
-    public function hasActiveSubscription(string $loginOrEmail, bool $isEmail = false): bool
+    public function hasActiveSubscription(string $loginOrEmail, bool $isEmail = false, AmemberInstallation|int|null $installation = null): bool
     {
-        $accessData = $this->getUserAccess($loginOrEmail, $isEmail);
+        $accessData = $this->getUserAccess($loginOrEmail, $isEmail, $installation);
 
         if (!$accessData || !isset($accessData['subscriptions'])) {
             return false;
@@ -355,20 +370,43 @@ class AmemberSsoService
     }
 
     /**
-     * Get access records for a user (detailed subscription info).
-     * Uses the access() API endpoint.
+     * Get a user's access records from /api/access, each with its product
+     * record from /api/products under `product` (null if it couldn't be read).
+     *
+     * aMember's access controller has no nested relations, so the products
+     * are fetched separately, once per distinct product.
+     *
+     * @return list<array<string, mixed>>
      */
-    public function getAccessRecords(int $userId): array
+    public function getAccessRecords(int $userId, AmemberInstallation|int|null $installation = null): array
     {
         try {
-            $response = AMember::access()
-                ->filter(['user_id' => $userId])
-                ->nested(['product'])
-                ->getAccess();
+            $client = $this->client($installation);
 
-            return $response ? $response->toArray() : [];
+            $records = [];
+            $page = 0;
+            do {
+                $batch = $client->list('access', ['user_id' => $userId], AmemberApiClient::MAX_PAGE_SIZE, $page++);
+                array_push($records, ...$batch);
+            } while (count($batch) === AmemberApiClient::MAX_PAGE_SIZE);
+
+            $products = [];
+            foreach (array_unique(array_column($records, 'product_id')) as $productId) {
+                try {
+                    $products[$productId] = $client->find('products', $productId);
+                } catch (\Exception $e) {
+                    $this->logApiError("product {$productId} lookup", $e);
+                    $products[$productId] = null;
+                }
+            }
+
+            return array_map(
+                fn (array $record) => $record + ['product' => $products[$record['product_id'] ?? ''] ?? null],
+                $records
+            );
         } catch (\Exception $e) {
-            $this->logError("Failed to fetch access records: {$e->getMessage()}");
+            $this->logApiError('access records lookup', $e);
+
             return [];
         }
     }
@@ -395,17 +433,9 @@ class AmemberSsoService
      */
     protected function syncUserData(object $user, array $amemberUser): object
     {
-        $syncFields = config('amember-sso.access_control.syncable_fields', []);
+        $changed = UserDataSync::apply($user, $amemberUser);
 
-        $updated = false;
-        foreach ($syncFields as $field) {
-            if (isset($amemberUser[$field]) && $user->$field !== $amemberUser[$field]) {
-                $user->$field = $amemberUser[$field];
-                $updated = true;
-            }
-        }
-
-        if ($updated) {
+        if ($changed) {
             $user->save();
         }
 
@@ -413,11 +443,25 @@ class AmemberSsoService
     }
 
     /**
-     * Clear cached access data for a user.
+     * Clear cached access data for a user. Clears the default installation's
+     * entry and, when given, the installation's own entry.
      */
-    public function clearAccessCache(string $loginOrEmail): void
+    public function clearAccessCache(string $loginOrEmail, AmemberInstallation|int|null $installation = null): void
     {
-        Cache::forget("amember_access_" . md5($loginOrEmail));
+        Cache::forget($this->accessCacheKey($loginOrEmail, null));
+
+        if ($installation !== null) {
+            Cache::forget($this->accessCacheKey($loginOrEmail, $installation));
+        }
+    }
+
+    protected function accessCacheKey(string $loginOrEmail, AmemberInstallation|int|null $installation): string
+    {
+        $installationId = $installation instanceof AmemberInstallation ? $installation->getKey() : $installation;
+
+        return $installationId === null
+            ? 'amember_access_' . md5($loginOrEmail)
+            : "amember_access_{$installationId}_" . md5($loginOrEmail);
     }
 
     /**
@@ -463,27 +507,21 @@ class AmemberSsoService
     /**
      * Log error message.
      */
-    protected function logError(string $message): void
+    protected function logError(string $message, array $context = []): void
     {
         if (config('amember-sso.logging.enabled')) {
-            Log::channel(config('amember-sso.logging.channel'))->error($message);
+            Log::channel(config('amember-sso.logging.channel'))->error($message, $context);
         }
     }
 
     /**
-     * Get direct access to the AMember facade for advanced usage.
+     * Log a failed API call with its HTTP status (null when there was no response).
      */
-    public function amember()
+    protected function logApiError(string $what, \Exception $e): void
     {
-        return AMember::getFacadeRoot();
-    }
-
-    /**
-     * Get direct access to AMemberClient for custom API calls.
-     */
-    public function client(): AMemberClient
-    {
-        return AMemberClient::getInstance();
+        $this->logError("aMember API error during {$what}: {$e->getMessage()}", [
+            'status' => $e instanceof AmemberApiException ? $e->status : null,
+        ]);
     }
 
     /**

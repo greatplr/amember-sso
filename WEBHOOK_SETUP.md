@@ -133,11 +133,15 @@ These webhooks are handled by aMember and don't need to be sent to your app:
 
 ---
 
-## IP Whitelisting
+## Securing Webhooks
 
-For security, the package detects aMember installations by IP address.
+aMember identifies nothing and signs nothing: there is no HMAC, signature or
+timestamp on its webhooks. The package checks two things instead.
 
-### Setup
+### 1. Source IP (always)
+
+The package finds the installation by the request's source IP.
+
 1. Find your aMember server's public IP address
 2. Add installation in your app's database or Filament admin:
    - Name: "My aMember Site"
@@ -145,7 +149,59 @@ For security, the package detects aMember installations by IP address.
    - API URL: `https://example.com/members/api`
    - API Key: (from aMember admin)
 
-3. Webhooks from this IP will be accepted; others rejected.
+3. Webhooks from this IP will be accepted; others get HTTP 400.
+
+If your app is behind Cloudflare or a load balancer, configure Laravel's
+trusted proxies so `$request->ip()` is aMember's IP, not the proxy's.
+
+### 2. Shared secret header (recommended)
+
+Set a `webhook_secret` on the installation, then send it from aMember as a
+fixed header:
+
+1. Generate a long random value, e.g. `php -r 'echo bin2hex(random_bytes(32));'`
+2. Save it as the installation's `webhook_secret`
+3. In aMember, edit **each** webhook pointing at your app and add this line to
+   its **Headers** field:
+
+   ```
+   X-Amember-Secret: <the same value>
+   ```
+
+Once `webhook_secret` is set, a request without that header, or with a
+different value, gets HTTP 403 and is logged as `failed`. The comparison uses
+`hash_equals()`. With no `webhook_secret`, the IP check is the only check.
+
+The header name can be changed with `AMEMBER_WEBHOOK_SECRET_HEADER`
+(config `amember-sso.webhook.secret_header`); the aMember side must match.
+
+> Upgrading from 1.x: 1.x expected an HMAC in `X-Amember-Signature`, which
+> aMember never sends, so installations with a `webhook_secret` were rejecting
+> every webhook. Add the `X-Amember-Secret` header above in aMember.
+
+---
+
+## Responses and Retries
+
+aMember treats **only HTTP 200** as delivered. Anything else, including 201,
+202 and 204, counts as a failure: aMember retries every 5 minutes, up to 10
+times, then (if enabled) emails the admin that the webhook failed.
+
+The package answers:
+
+| Response | When |
+|---|---|
+| `200 {"status":"success"}` | Accepted (queued, or processed when `use_queue` is off) |
+| `400` | Unknown source IP, or no `am-event` |
+| `403` | `webhook_secret` set and the header is missing or wrong |
+| `500` | Processing threw (only when processing synchronously) |
+
+A retry resends the same payload, so the handlers are idempotent: access
+records are upserted by `access_id`, users are matched before being created,
+and deletes of missing rows are no-ops. Your own listeners on the package's
+events can see the same event more than once and should cope with that.
+
+Webhooks are sent by aMember's cron, so expect up to a minute or two of delay.
 
 ---
 
@@ -201,6 +257,12 @@ For security, the package detects aMember installations by IP address.
 1. Check aMember's webhook queue: Admin → Webhooks → Queue
 2. Check webhook logs in your app: `amember_webhook_logs` table
 3. Verify IP address matches in `amember_installations` table
+
+### Webhooks Rejected with 403
+The installation has a `webhook_secret` and the request didn't carry it.
+Check the webhook's **Headers** field in aMember reads exactly
+`X-Amember-Secret: <webhook_secret>` (or your configured header name), on
+every webhook pointing at your app.
 
 ### Access Not Granted After Purchase
 1. Check webhook logs - did `accessAfterInsert` fire?

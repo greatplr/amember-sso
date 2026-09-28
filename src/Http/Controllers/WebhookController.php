@@ -8,6 +8,7 @@ use Greatplr\AmemberSso\Events\SubscriptionUpdated;
 use Greatplr\AmemberSso\Models\AmemberInstallation;
 use Greatplr\AmemberSso\Models\AmemberProduct;
 use Greatplr\AmemberSso\Services\AmemberSsoService;
+use Greatplr\AmemberSso\Support\UserDataSync;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
@@ -37,10 +38,10 @@ class WebhookController extends Controller
                 return response()->json(['error' => 'Unknown installation'], 400);
             }
 
-            // Verify webhook signature for this installation
-            if (!$this->verifyWebhookSignature($request, $installation)) {
-                $this->logWebhook($request, 'failed', 'Invalid signature');
-                return response()->json(['error' => 'Invalid signature'], 403);
+            // aMember doesn't sign webhooks: check the shared secret header instead
+            if (!$this->verifyWebhookSecret($request, $installation)) {
+                $this->logWebhook($request, 'failed', 'Invalid or missing webhook secret');
+                return response()->json(['error' => 'Invalid webhook secret'], 403);
             }
 
             // aMember sends event type as 'am-event' in camelCase
@@ -129,7 +130,7 @@ class WebhookController extends Controller
             // We'll rely on accessAfterInsert for actual subscription creation
             // This event just confirms user got the product
 
-            $this->clearUserCache($userData);
+            $this->clearUserCache($userData, $installation);
 
             DB::commit();
 
@@ -167,7 +168,7 @@ class WebhookController extends Controller
             ->where('installation_id', $installation->id)
             ->delete();
 
-        $this->clearUserCache($userData);
+        $this->clearUserCache($userData, $installation);
 
         event(new SubscriptionDeleted($request->all()));
 
@@ -206,7 +207,7 @@ class WebhookController extends Controller
             // Create subscription from access record
             $subscription = $this->upsertSubscriptionFromAccess($accessData, $installation, $user);
 
-            $this->clearUserCache($userData);
+            $this->clearUserCache($userData, $installation);
 
             // Get product mapping
             $productMapping = AmemberProduct::findByAmemberProduct(
@@ -245,7 +246,7 @@ class WebhookController extends Controller
             $user = $this->findOrCreateUser($userData, $installation);
             $subscription = $this->upsertSubscriptionFromAccess($accessData, $installation, $user);
 
-            $this->clearUserCache($userData);
+            $this->clearUserCache($userData, $installation);
 
             // Get product mapping
             $productMapping = AmemberProduct::findByAmemberProduct(
@@ -283,7 +284,7 @@ class WebhookController extends Controller
             ->where('installation_id', $installation->id)
             ->delete();
 
-        $this->clearUserCache($userData);
+        $this->clearUserCache($userData, $installation);
 
         event(new SubscriptionDeleted($request->all(), $productMapping));
     }
@@ -304,7 +305,7 @@ class WebhookController extends Controller
             'user_id' => $userData['user_id'] ?? null,
         ]);
 
-        $this->clearUserCache($userData);
+        $this->clearUserCache($userData, $installation);
     }
 
     /**
@@ -322,7 +323,7 @@ class WebhookController extends Controller
             'user_id' => $userData['user_id'] ?? null,
         ]);
 
-        $this->clearUserCache($userData);
+        $this->clearUserCache($userData, $installation);
     }
 
     /**
@@ -371,7 +372,7 @@ class WebhookController extends Controller
                 $this->syncUserDataFromWebhook($user, $userData);
             }
 
-            $this->clearUserCache($userData);
+            $this->clearUserCache($userData, $installation);
 
             DB::commit();
         } catch (\Exception $e) {
@@ -385,27 +386,7 @@ class WebhookController extends Controller
      */
     protected function syncUserDataFromWebhook(object $user, array $userData): void
     {
-        $syncableFields = config('amember-sso.access_control.syncable_fields', []);
-        $changed = false;
-
-        foreach ($syncableFields as $field) {
-            if (isset($userData[$field]) && $user->{$field} !== $userData[$field]) {
-                $user->{$field} = $userData[$field];
-                $changed = true;
-            }
-        }
-
-        // Handle name fields specially (name_f, name_l -> name)
-        if (in_array('name_f', $syncableFields) || in_array('name_l', $syncableFields)) {
-            $nameF = $userData['name_f'] ?? '';
-            $nameL = $userData['name_l'] ?? '';
-            $fullName = trim($nameF . ' ' . $nameL);
-
-            if ($fullName && $user->name !== $fullName) {
-                $user->name = $fullName;
-                $changed = true;
-            }
-        }
+        $changed = UserDataSync::apply($user, $userData);
 
         if ($changed) {
             $user->save();
@@ -420,18 +401,18 @@ class WebhookController extends Controller
     /**
      * Clear user's access cache from webhook data.
      */
-    protected function clearUserCache(array $data): void
+    protected function clearUserCache(array $data, AmemberInstallation $installation): void
     {
         // Try to get login or email from webhook data
         $login = $data['login'] ?? null;
         $email = $data['email'] ?? null;
 
         if ($login) {
-            $this->amemberSso->clearAccessCache($login);
+            $this->amemberSso->clearAccessCache($login, $installation);
         }
 
         if ($email && $email !== $login) {
-            $this->amemberSso->clearAccessCache($email);
+            $this->amemberSso->clearAccessCache($email, $installation);
         }
     }
 
@@ -477,7 +458,7 @@ class WebhookController extends Controller
 
         // Create new user
         $username = $data['username'] ?? $data['login'] ?? explode('@', $email)[0];
-        $name = $data['name'] ?? $data['name_f'] ?? trim(($data['name_f'] ?? '') . ' ' . ($data['name_l'] ?? ''));
+        $name = UserDataSync::fullName($data);
 
         $user = $userModel::create([
             'email' => $email,
@@ -573,24 +554,18 @@ class WebhookController extends Controller
     }
 
     /**
-     * Verify webhook signature for an installation.
+     * Verify the shared secret for an installation.
+     *
+     * aMember never signs webhooks. When the installation has a webhook_secret,
+     * the admin adds it as a fixed header in aMember's webhook "Headers" field
+     * (`X-Amember-Secret: <secret>` by default, see webhook.secret_header).
+     * Without a webhook_secret, the IP match in handle() is the only check.
      */
-    protected function verifyWebhookSignature(Request $request, AmemberInstallation $installation): bool
+    protected function verifyWebhookSecret(Request $request, AmemberInstallation $installation): bool
     {
-        if (!$installation->webhook_secret) {
-            // No secret configured for this installation
-            return true;
-        }
+        $header = config('amember-sso.webhook.secret_header', 'X-Amember-Secret');
 
-        $signature = $request->header('X-Amember-Signature');
-        if (!$signature) {
-            return false;
-        }
-
-        $payload = $request->getContent();
-        $calculatedSignature = hash_hmac('sha256', $payload, $installation->webhook_secret);
-
-        return hash_equals($calculatedSignature, $signature);
+        return $installation->verifyWebhookSecret($request->header($header));
     }
 
     /**

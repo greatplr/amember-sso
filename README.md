@@ -1,6 +1,6 @@
 # aMember SSO for Laravel
 
-A comprehensive Laravel package that wraps `plutuss/amember-pro-laravel` to provide SSO authentication, webhook handling for subscription updates, and middleware for access control.
+A comprehensive Laravel package that talks to aMember Pro's REST API to provide SSO authentication, webhook handling for subscription updates, and middleware for access control.
 
 ## Features
 
@@ -53,8 +53,8 @@ php artisan migrate
 Add the following variables to your `.env` file:
 
 ```env
-# aMember API Configuration
-AMEMBER_API_URL=https://your-amember-site.com
+# Default aMember API: the aMember root followed by /api
+AMEMBER_URL=https://your-amember-site.com/api
 AMEMBER_API_KEY=your-api-key
 
 # SSO Configuration
@@ -433,20 +433,26 @@ Access the underlying `AmemberApi` client:
 ```php
 use Greatplr\AmemberSso\Facades\AmemberSso;
 
-$apiClient = AmemberSso::getApiClient();
+$apiClient = AmemberSso::client();              // default installation
+$apiClient = AmemberSso::client($installation); // or a specific one
 
-// Use any method from plutuss/amember-pro-laravel
-$user = $apiClient->getUserByLogin('user@example.com');
-$products = $apiClient->getProducts();
+$users = $apiClient->list('users', ['login' => 'jane']); // _total stripped
+$product = $apiClient->find('products', 4);
 ```
+
+`client()` returns `Greatplr\AmemberSso\Api\AmemberApiClient`, which returns
+plain arrays and throws `AmemberApiException` on connection errors, non-2xx
+responses and non-JSON bodies. The facade's own API methods catch those and
+return `null` / `false` / `[]`.
 
 ## Configuration
 
 The configuration file `config/amember-sso.php` provides extensive customization options:
 
 ### API Configuration
-- `api_url`: Your aMember installation URL
-- `api_key`: aMember API key
+- `api.url` (`AMEMBER_URL`): the default installation's API URL, `{amember_root}/api`
+- `api.key` (`AMEMBER_API_KEY`): its API key
+- `api.timeout` (`AMEMBER_API_TIMEOUT`): request timeout in seconds, default 10
 
 ### SSO Configuration
 - `sso.enabled`: Enable/disable SSO
@@ -646,7 +652,6 @@ This package is open-sourced software licensed under the [MIT license](LICENSE).
 
 ## Credits
 
-- Built on top of [plutuss/amember-pro-laravel](https://github.com/plutuss/amember-pro-laravel)
 - Developed by [GreatPLR](https://github.com/greatplr)
 
 ## Support

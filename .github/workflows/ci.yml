@@ -14,7 +14,7 @@ permissions:
 jobs:
   resolve:
     # Proves every PHP and Laravel version this package claims to support can
-    # actually install it. A constraint that is declared but never exercised is
+    # actually install it, and that the test suite passes on each. A constraint that is declared but never exercised is
     # how the Laravel 13 block went unnoticed until a consuming application
     # tried to upgrade and could not.
     name: PHP ${{ matrix.php }} / Laravel ${{ matrix.laravel }}
@@ -49,11 +49,7 @@ jobs:
           composer update --prefer-dist --no-interaction --no-progress
 
       - name: Lint
-        run: find src config database routes -name '*.php' -print0 | xargs -0 -n1 php -l
+        run: find src config database routes tests -name '*.php' -print0 | xargs -0 -n1 php -l
 
-  # Not yet running the test suite. tests/Feature/WebhookHandlingTest.php
-  # extends the host application's Tests\TestCase, which does not exist inside
-  # a package, so the six tests it contains have never been runnable. Fixing
-  # that needs an Orchestra Testbench base case and a resolution to the
-  # duplicate migration run it currently hits. Add a `tests` job here once the
-  # harness works, so this file stops being the only gate.
+      - name: Run tests
+        run: vendor/bin/phpunit

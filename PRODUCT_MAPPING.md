@@ -356,12 +356,11 @@ Automatically sync product details when webhooks arrive:
 // In your webhook handler or artisan command
 use Greatplr\AmemberSso\Models\AmemberProduct;
 use Greatplr\AmemberSso\Models\AmemberInstallation;
-use Plutuss\AMember\Facades\AMember;
 
 $installation = AmemberInstallation::find(1);
 
-// Get products from aMember API
-$amemberProducts = AMember::products()->getProducts();
+// Get products from this installation's aMember API (up to 1000 per page)
+$amemberProducts = $installation->getApiClient()->list('products', count: 1000);
 
 foreach ($amemberProducts as $amemberProduct) {
     // Update or create product mapping

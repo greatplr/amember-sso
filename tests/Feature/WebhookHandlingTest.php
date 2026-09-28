@@ -3,9 +3,10 @@
 namespace Greatplr\AmemberSso\Tests\Feature;
 
 use Greatplr\AmemberSso\Models\AmemberInstallation;
+use Greatplr\AmemberSso\Tests\TestCase;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
-use Tests\TestCase;
+use PHPUnit\Framework\Attributes\Test;
 
 class WebhookHandlingTest extends TestCase
 {
@@ -29,10 +30,31 @@ class WebhookHandlingTest extends TestCase
         ]);
     }
 
-    /** @test */
-    public function it_handles_subscription_added_webhook()
+    /**
+     * POST a webhook the way aMember delivers it: a form-encoded body from the
+     * installation's IP, carrying the shared secret header its admin set up.
+     */
+    protected function postWebhook(array $payload, string $ip = '127.0.0.1', ?string $secret = 'test-secret'): \Illuminate\Testing\TestResponse
     {
-        $response = $this->post('/amember/webhook', [
+        $body = http_build_query($payload);
+        parse_str($body, $parameters); // what PHP puts in $_POST: every value a string
+
+        $server = [
+            'REMOTE_ADDR' => $ip,
+            'CONTENT_TYPE' => 'application/x-www-form-urlencoded',
+        ];
+
+        if ($secret !== null) {
+            $server['HTTP_X_AMEMBER_SECRET'] = $secret;
+        }
+
+        return $this->call('POST', '/amember/webhook', $parameters, [], [], $server, $body);
+    }
+
+    #[Test]
+    public function it_handles_subscription_added_webhook(): void
+    {
+        $response = $this->postWebhook([
             'am-webhooks-version' => '1.0',
             'am-event' => 'subscriptionAdded',
             'am-timestamp' => now()->toIso8601String(),
@@ -51,9 +73,7 @@ class WebhookHandlingTest extends TestCase
                 'title' => 'Premium Plan',
                 'description' => 'Full access to all features',
             ],
-        ], [
-            'REMOTE_ADDR' => '127.0.0.1',
-        ]);
+        ], '127.0.0.1');
 
         $response->assertStatus(200);
         $response->assertJson(['status' => 'success']);
@@ -66,11 +86,11 @@ class WebhookHandlingTest extends TestCase
         ]);
     }
 
-    /** @test */
-    public function it_handles_access_after_insert_webhook()
+    #[Test]
+    public function it_handles_access_after_insert_webhook(): void
     {
         // Test with real payload structure from aMember 6.3.35 (anonymized)
-        $response = $this->post('/amember/webhook', [
+        $response = $this->postWebhook([
             'am-webhooks-version' => '1.0',
             'am-event' => 'accessAfterInsert',
             'am-timestamp' => '2025-10-20T18:37:07-06:00',
@@ -99,9 +119,7 @@ class WebhookHandlingTest extends TestCase
                 'is_approved' => '1',
                 'is_locked' => '0',
             ],
-        ], [
-            'REMOTE_ADDR' => '127.0.0.1',
-        ]);
+        ], '127.0.0.1');
 
         $response->assertStatus(200);
 
@@ -124,8 +142,8 @@ class WebhookHandlingTest extends TestCase
         ]);
     }
 
-    /** @test */
-    public function it_handles_subscription_deleted_webhook()
+    #[Test]
+    public function it_handles_subscription_deleted_webhook(): void
     {
         // First create a user and subscription
         $userModel = config('amember-sso.user_model');
@@ -138,8 +156,10 @@ class WebhookHandlingTest extends TestCase
             'password' => bcrypt('password'),
         ]);
 
+        // Rows are created from aMember access records, so access_id is required
         DB::table('amember_subscriptions')->insert([
             'installation_id' => $this->installation->id,
+            'access_id' => 900,
             'user_id' => 123,
             'product_id' => 5,
             'status' => 'active',
@@ -148,7 +168,7 @@ class WebhookHandlingTest extends TestCase
         ]);
 
         // Send webhook
-        $response = $this->post('/amember/webhook', [
+        $response = $this->postWebhook([
             'am-webhooks-version' => '1.0',
             'am-event' => 'subscriptionDeleted',
             'am-timestamp' => now()->toIso8601String(),
@@ -162,9 +182,7 @@ class WebhookHandlingTest extends TestCase
                 'product_id' => 5,
                 'title' => 'Premium Plan',
             ],
-        ], [
-            'REMOTE_ADDR' => '127.0.0.1',
-        ]);
+        ], '127.0.0.1');
 
         $response->assertStatus(200);
 
@@ -176,25 +194,23 @@ class WebhookHandlingTest extends TestCase
         ]);
     }
 
-    /** @test */
-    public function it_rejects_webhooks_from_unknown_ip()
+    #[Test]
+    public function it_rejects_webhooks_from_unknown_ip(): void
     {
-        $response = $this->post('/amember/webhook', [
+        $response = $this->postWebhook([
             'am-webhooks-version' => '1.0',
             'am-event' => 'subscriptionAdded',
             'am-timestamp' => now()->toIso8601String(),
             'user' => ['user_id' => 123, 'email' => 'test@example.com'],
             'product' => ['product_id' => 5],
-        ], [
-            'REMOTE_ADDR' => '192.168.1.1', // Unknown IP
-        ]);
+        ], '192.168.1.1');
 
         $response->assertStatus(400);
         $response->assertJson(['error' => 'Unknown installation']);
     }
 
-    /** @test */
-    public function it_handles_user_after_update_webhook()
+    #[Test]
+    public function it_handles_user_after_update_webhook(): void
     {
         // Create existing user
         $userModel = config('amember-sso.user_model');
@@ -208,7 +224,7 @@ class WebhookHandlingTest extends TestCase
         ]);
 
         // Send update webhook
-        $response = $this->post('/amember/webhook', [
+        $response = $this->postWebhook([
             'am-webhooks-version' => '1.0',
             'am-event' => 'userAfterUpdate',
             'am-timestamp' => now()->toIso8601String(),
@@ -224,9 +240,7 @@ class WebhookHandlingTest extends TestCase
                 'name_f' => 'Old',
                 'name_l' => 'Name',
             ],
-        ], [
-            'REMOTE_ADDR' => '127.0.0.1',
-        ]);
+        ], '127.0.0.1');
 
         $response->assertStatus(200);
 
@@ -236,18 +250,16 @@ class WebhookHandlingTest extends TestCase
         $this->assertEquals('New Name', $user->name);
     }
 
-    /** @test */
-    public function it_logs_webhook_events()
+    #[Test]
+    public function it_logs_webhook_events(): void
     {
-        $this->post('/amember/webhook', [
+        $this->postWebhook([
             'am-webhooks-version' => '1.0',
             'am-event' => 'subscriptionAdded',
             'am-timestamp' => now()->toIso8601String(),
             'user' => ['user_id' => 123, 'email' => 'test@example.com'],
             'product' => ['product_id' => 5],
-        ], [
-            'REMOTE_ADDR' => '127.0.0.1',
-        ]);
+        ], '127.0.0.1');
 
         // Verify webhook was logged
         $this->assertDatabaseHas('amember_webhook_logs', [
@@ -255,5 +267,37 @@ class WebhookHandlingTest extends TestCase
             'status' => 'received',
             'ip_address' => '127.0.0.1',
         ]);
+    }
+
+    #[Test]
+    public function a_retried_delivery_does_not_duplicate_anything(): void
+    {
+        // aMember retries with the same payload until it gets HTTP 200
+        $payload = [
+            'am-webhooks-version' => '1.0',
+            'am-event' => 'accessAfterInsert',
+            'am-timestamp' => '2025-10-20T18:37:07-06:00',
+            'am-root-url' => 'https://example.com/members',
+            'access' => [
+                'access_id' => '3911',
+                'user_id' => '1977',
+                'product_id' => '50',
+                'begin_date' => '2025-10-20',
+                'expire_date' => '2037-12-31',
+            ],
+            'user' => [
+                'user_id' => '1977',
+                'login' => 'johndoe',
+                'email' => 'john@example.com',
+                'name_f' => 'John',
+                'name_l' => 'Doe',
+            ],
+        ];
+
+        $this->postWebhook($payload)->assertStatus(200);
+        $this->postWebhook($payload)->assertStatus(200);
+
+        $this->assertDatabaseCount('users', 1);
+        $this->assertDatabaseCount('amember_subscriptions', 1);
     }
 }
