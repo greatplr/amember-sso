@@ -138,39 +138,23 @@ AmemberInstallation::create([
 
 ### 3. Configure Webhooks in Each aMember
 
-For each aMember installation, configure:
+For each aMember installation, add webhooks (Setup/Configuration → Webhooks):
 
 **URL:** `https://your-laravel-app.com/amember/webhook`
-**Method:** POST
-**Secret:** (same as `webhook_secret` in database)
-**Header:** `X-Amember-Signature: <hmac-sha256>`
+**Headers:** `X-Amember-Secret: <that installation's webhook_secret>`
 
-Events to send:
-- subscription.added
-- subscription.updated
-- subscription.deleted
-- payment.completed
-- payment.refunded
+aMember does not sign webhooks, so the secret travels as this fixed header;
+see [WEBHOOK_SETUP.md](WEBHOOK_SETUP.md#securing-webhooks).
 
-### 4. Configure Each Webhook Payload
+Events to send (aMember's camelCase ids): `accessAfterInsert`,
+`accessAfterUpdate`, `accessAfterDelete`, and `userAfterUpdate`. See
+WEBHOOK_SETUP.md for what each does.
 
-aMember should send these fields:
-```json
-{
-  "event": "subscription.added",
-  "data": {
-    "user_id": 123,
-    "email": "user@example.com",
-    "username": "johndoe",
-    "name_f": "John",
-    "name_l": "Doe",
-    "product_id": 1,
-    "access_id": 456,
-    "begin_date": "2024-01-01",
-    "expire_date": "2025-01-01"
-  }
-}
-```
+### 4. Webhook Payload
+
+aMember POSTs **form-encoded** data (not JSON), with nested objects flattened
+one level, e.g. `am-event=accessAfterInsert&access[access_id]=456&user[email]=...`.
+See [WEBHOOK_PAYLOADS.md](WEBHOOK_PAYLOADS.md) and docs/AMEMBER_REFERENCE.md.
 
 ## How It Works
 
@@ -181,7 +165,7 @@ aMember should send these fields:
    ↓
 2. Package finds installation by IP address
    ↓
-3. Verifies signature using installation's webhook_secret
+3. Checks the X-Amember-Secret header against the installation's webhook_secret (if set)
    ↓
 4. Finds or creates user with:
    - amember_user_id from webhook
@@ -197,9 +181,9 @@ aMember should send these fields:
 ```
 1. User submits email/password
    ↓
-2. App calls: AmemberSso::authenticateByLoginPass(email, pass)
+2. App calls: AmemberSso::authenticateByLoginPass(email, pass, null, $installation)
    ↓
-3. Checks against aMember (you need to specify which installation)
+3. Checks against that installation's aMember API (its api_url / api_key)
    ↓
 4. Matches local user by amember_user_id + installation_id
    ↓
@@ -214,9 +198,8 @@ If you have multiple installations, you need to know which one to authenticate a
 ```php
 $installation = AmemberInstallation::find($request->input('installation_id'));
 
-// Use installation-specific API client
-$client = $installation->getApiClient();
-// ... authenticate
+// Every API method takes the installation (model or id) as its last argument
+$accessData = AmemberSso::authenticateByLoginPass($email, $password, null, $installation);
 ```
 
 **Option 2: Try all active installations**
@@ -225,9 +208,9 @@ $installations = AmemberInstallation::active()->get();
 
 foreach ($installations as $installation) {
     // Try to authenticate against this installation
-    $accessData = /* check-access call to this installation */;
+    $accessData = AmemberSso::authenticateByLoginPass($email, $password, null, $installation);
 
-    if ($accessData && $accessData['ok']) {
+    if ($accessData) {
         // Found! Login with this installation
         $user = $this->findLocalUser(
             $accessData['user_id'],
@@ -433,18 +416,19 @@ class AmemberInstallationResource extends Resource
 ### Test Webhook Reception
 
 ```bash
+# From an IP registered on an installation, form-encoded like aMember sends it
 curl -X POST https://your-app.com/amember/webhook \
-  -H "Content-Type: application/json" \
-  -H "X-Amember-Signature: <calculated-hmac>" \
-  -d '{
-    "event": "subscription.added",
-    "data": {
-      "user_id": 123,
-      "email": "test@example.com",
-      "product_id": 1,
-      "access_id": 456
-    }
-  }'
+  -H "X-Amember-Secret: your-webhook-secret" \
+  --data-urlencode "am-webhooks-version=1.0" \
+  --data-urlencode "am-event=accessAfterInsert" \
+  --data-urlencode "access[access_id]=456" \
+  --data-urlencode "access[user_id]=123" \
+  --data-urlencode "access[product_id]=1" \
+  --data-urlencode "access[begin_date]=2026-01-01" \
+  --data-urlencode "access[expire_date]=2037-12-31" \
+  --data-urlencode "user[user_id]=123" \
+  --data-urlencode "user[login]=test" \
+  --data-urlencode "user[email]=test@example.com"
 ```
 
 ### Check Logs
@@ -473,7 +457,7 @@ The package identifies installations by IP address. Make sure:
 
 1. **Static IPs:** Each aMember installation has a static IP
 2. **Firewall Rules:** Only allow webhooks from known IPs
-3. **Signature Verification:** Always set `webhook_secret`
+3. **Shared Secret:** Always set `webhook_secret` and add the `X-Amember-Secret` header in aMember
 
 ### API Key Security
 

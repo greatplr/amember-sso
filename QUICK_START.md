@@ -12,7 +12,8 @@ php artisan migrate
 ## Environment Setup
 
 ```env
-# aMember API (used by plutuss/amember-pro-laravel)
+# Default aMember API (aMember root + /api). Installations stored in
+# amember_installations use their own api_url / api_key instead.
 AMEMBER_URL=https://your-amember-site.com/api
 AMEMBER_API_KEY=your-api-key
 
@@ -49,8 +50,12 @@ Webhooks will:
 ```php
 use Greatplr\AmemberSso\Facades\AmemberSso;
 
-// Authenticate with login/password
+// Authenticate with login/password (login may be the username or the email)
 $accessData = AmemberSso::authenticateByLoginPass('user@example.com', 'password');
+
+// Optional 3rd argument: the visitor's REAL IP. aMember logs it and can LOCK
+// the account for account sharing, so never pass a server IP or an id.
+// Optional 4th argument: the AmemberInstallation (or id) to check against.
 if ($accessData && $accessData['ok']) {
     // User verified in aMember, now login to Laravel
     // Matches by amember_user_id (preferred) or email (fallback)
@@ -209,33 +214,35 @@ greatplr/amember-sso/
 
 ### 6. Direct API Access
 
-For advanced usage, access the underlying `plutuss/amember-pro-laravel` package:
+For other endpoints, use the API client directly. It returns plain arrays and
+throws `Greatplr\AmemberSso\Api\AmemberApiException` (with `->status`) on
+connection errors, non-2xx responses and non-JSON bodies.
 
 ```php
 use Greatplr\AmemberSso\Facades\AmemberSso;
-use Plutuss\AMember\Facades\AMember;
 
-// Use AMember facade directly
-$users = AMember::users()->count(10)->getUsers();
-$products = AMember::products()->getProducts();
-
-// Or through the AmemberSso facade
+// Default installation (AMEMBER_URL / AMEMBER_API_KEY)
 $client = AmemberSso::client();
-$response = $client
-    ->setOption('/users')
-    ->filter(['email' => 'user@example.com'])
-    ->sendGet();
+
+// Or a specific installation (model or id)
+$client = AmemberSso::client($installation);
+
+// List endpoints: _total is stripped, records come back as a list
+$users = $client->list('users', ['email' => 'user@example.com'], count: 10);
+$user = $client->find('users', 123);
+
+// Any other call
+$response = $client->checkAccess('by-login', ['login' => 'jane']);
 ```
+
+Every API method on the facade also takes the installation as its last
+argument, e.g. `AmemberSso::checkAccessByEmail($email, $installation)`.
 
 ## How This Package Works
 
-This package **wraps** `plutuss/amember-pro-laravel` and adds Laravel-specific features:
+This package talks to aMember's REST API with its own small client (on
+Laravel's HTTP client, one instance per installation) and adds:
 
-**plutuss/amember-pro-laravel provides:**
-- Raw API access to all aMember endpoints
-- HTTP client for API communication
-
-**greatplr/amember-sso adds:**
 - ✅ Authentication helpers (check-access API)
 - ✅ SSO URL generation
 - ✅ Laravel middleware for access control

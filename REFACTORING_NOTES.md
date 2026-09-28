@@ -1,5 +1,13 @@
 # Refactoring Notes
 
+> **Superseded in 2.0.** These notes describe the 1.x design, which wrapped
+> `plutuss/amember-pro-laravel`. 2.0 dropped that dependency for the package's
+> own `Greatplr\AmemberSso\Api\AmemberApiClient` (one client per installation,
+> no shared state), removed `amember()`, and made `client()` return the new
+> client. Webhooks no longer use an HMAC signature: see WEBHOOK_SETUP.md. The
+> env vars `AMEMBER_URL` and `AMEMBER_API_KEY` are still read, now from
+> `config/amember-sso.php` (`api.url`, `api.key`).
+
 ## What Changed
 
 The package was refactored to properly **wrap and extend** `plutuss/amember-pro-laravel` instead of duplicating its functionality.

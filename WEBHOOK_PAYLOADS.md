@@ -510,9 +510,13 @@ This indicates the actual value is too large for the webhook.
 
 ### No Signature Header
 
-Based on the real webhook example, aMember does **NOT** send an `X-Amember-Signature` header by default.
+aMember does **not** sign webhooks: no HMAC, no `X-Amember-Signature`, no
+timestamp signature. The only headers are the ones an admin types into the
+webhook's **Headers** field.
 
-**You must configure** signature verification in your aMember installation if you want it.
+To authenticate deliveries, set the installation's `webhook_secret` and add
+`X-Amember-Secret: <webhook_secret>` to the webhook's Headers field in aMember.
+See WEBHOOK_SETUP.md.
 
 ### IP Whitelisting
 

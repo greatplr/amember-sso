@@ -285,7 +285,7 @@ GROUP BY message;
 
 Common failures:
 - **"Unknown installation IP"** - Add installation's IP to `amember_installations` table
-- **"Invalid signature"** - Check `webhook_secret` matches aMember config
+- **"Invalid or missing webhook secret"** - The installation has a `webhook_secret`; add `X-Amember-Secret: <webhook_secret>` to the webhook's Headers field in aMember (see WEBHOOK_SETUP.md)
 - **"No am-event field"** - aMember not sending correct payload format
 
 ### Webhooks Logged but Status = 'error'
