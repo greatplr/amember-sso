@@ -8,6 +8,7 @@ use Greatplr\AmemberSso\Events\SubscriptionUpdated;
 use Greatplr\AmemberSso\Models\AmemberInstallation;
 use Greatplr\AmemberSso\Models\AmemberProduct;
 use Greatplr\AmemberSso\Services\AmemberSsoService;
+use Greatplr\AmemberSso\Support\WebhookPayload;
 use Greatplr\AmemberSso\Support\UserDataSync;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -61,8 +62,8 @@ class WebhookController extends Controller
                     'installation' => $installation->name,
                     'installation_id' => $installation->id,
                     'ip' => $request->ip(),
-                    'headers' => $request->headers->all(),
-                    'payload' => $request->all(),
+                    'headers' => $this->redactedHeaders($request),
+                    'payload' => $this->payload($request),
                 ]);
             }
 
@@ -70,7 +71,7 @@ class WebhookController extends Controller
             if (config('amember-sso.webhook.use_queue', true)) {
                 \Greatplr\AmemberSso\Jobs\ProcessAmemberWebhook::dispatch(
                     $eventType,
-                    $request->all(),
+                    $this->payload($request),
                     $installation
                 )->onQueue(config('amember-sso.webhook.queue_name', 'amember-webhooks'));
 
@@ -137,7 +138,7 @@ class WebhookController extends Controller
             event(new SubscriptionAdded([
                 'user' => $userData,
                 'product' => $productData,
-            ], $request->all()));
+            ], $this->payload($request)));
 
             Log::info('Subscription added via webhook', [
                 'user_id' => $user->id,
@@ -170,7 +171,7 @@ class WebhookController extends Controller
 
         $this->clearUserCache($userData, $installation);
 
-        event(new SubscriptionDeleted($request->all()));
+        event(new SubscriptionDeleted($this->payload($request)));
 
         Log::info('Subscription deleted via webhook', [
             'user_id' => $userData['user_id'] ?? null,
@@ -217,7 +218,7 @@ class WebhookController extends Controller
 
             DB::commit();
 
-            event(new SubscriptionAdded($subscription, $request->all(), $productMapping));
+            event(new SubscriptionAdded($subscription, $this->payload($request), $productMapping));
 
             Log::info('Access record created via webhook', [
                 'user_id' => $user->id,
@@ -256,7 +257,7 @@ class WebhookController extends Controller
 
             DB::commit();
 
-            event(new SubscriptionUpdated($subscription, $request->all(), $productMapping));
+            event(new SubscriptionUpdated($subscription, $this->payload($request), $productMapping));
         } catch (\Exception $e) {
             DB::rollBack();
             throw $e;
@@ -286,7 +287,7 @@ class WebhookController extends Controller
 
         $this->clearUserCache($userData, $installation);
 
-        event(new SubscriptionDeleted($request->all(), $productMapping));
+        event(new SubscriptionDeleted($this->payload($request), $productMapping));
     }
 
     /**
@@ -578,11 +579,35 @@ class WebhookController extends Controller
         DB::table($tableName)->insert([
             'event_type' => $request->input('am-event'),
             'status' => $status,
-            'payload' => $request->getContent(),
+            'payload' => json_encode($this->payload($request), JSON_INVALID_UTF8_SUBSTITUTE),
             'message' => $message,
             'ip_address' => $request->ip(),
             'created_at' => now(),
             'updated_at' => now(),
         ]);
+    }
+
+    /**
+     * The parsed webhook payload with passwords masked. Everything downstream
+     * (logs, the webhook log table, the queue, events) uses this, never the raw body.
+     */
+    protected function payload(Request $request): array
+    {
+        return WebhookPayload::redact($request->all());
+    }
+
+    /**
+     * Request headers with the shared webhook secret masked.
+     */
+    protected function redactedHeaders(Request $request): array
+    {
+        $headers = $request->headers->all();
+        $secretHeader = strtolower(config('amember-sso.webhook.secret_header', 'X-Amember-Secret'));
+
+        if (isset($headers[$secretHeader])) {
+            $headers[$secretHeader] = [WebhookPayload::MASK];
+        }
+
+        return $headers;
     }
 }

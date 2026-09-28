@@ -12,6 +12,7 @@ use Greatplr\AmemberSso\Events\UserUpdated;
 use Greatplr\AmemberSso\Models\AmemberInstallation;
 use Greatplr\AmemberSso\Models\AmemberProduct;
 use Greatplr\AmemberSso\Services\AmemberSsoService;
+use Greatplr\AmemberSso\Support\WebhookPayload;
 use Greatplr\AmemberSso\Support\UserDataSync;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -38,13 +39,20 @@ class ProcessAmemberWebhook implements ShouldQueue
     public int $backoff;
 
     /**
+     * The webhook payload, with passwords masked so they are never serialized
+     * onto the queue. No handler needs them.
+     */
+    public array $payload;
+
+    /**
      * Initialize retry configuration from config.
      */
     public function __construct(
         public string $eventType,
-        public array $payload,
+        array $payload,
         public AmemberInstallation $installation
     ) {
+        $this->payload = WebhookPayload::redact($payload);
         $this->tries = config('amember-sso.webhook.max_retries', 3);
         $this->backoff = config('amember-sso.webhook.retry_delay', 60);
     }
