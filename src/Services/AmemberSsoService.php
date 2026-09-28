@@ -559,6 +559,29 @@ class AmemberSsoService
     }
 
     /**
+     * Check if user has an active, unexpired subscription to a product (local database).
+     */
+    protected function hasProductAccessLocal(string $amemberUserId, int|string $productId, $installationId = null): bool
+    {
+        $tableName = config('amember-sso.tables.subscriptions');
+
+        $query = \Illuminate\Support\Facades\DB::table($tableName)
+            ->where('user_id', $amemberUserId)
+            ->where('product_id', $productId)
+            ->where('status', 'active')
+            ->where(function ($q) {
+                $q->whereNull('expire_date')
+                  ->orWhere('expire_date', '>', now());
+            });
+
+        if ($installationId) {
+            $query->where('installation_id', $installationId);
+        }
+
+        return $query->exists();
+    }
+
+    /**
      * Get user's active tier(s).
      */
     public function getUserTiers(string $amemberUserId, $installationId = null): array
