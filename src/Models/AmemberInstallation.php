@@ -4,7 +4,7 @@ namespace Greatplr\AmemberSso\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Plutuss\AMember\AMemberClient;
+use Greatplr\AmemberSso\Api\AmemberApiClient;
 
 class AmemberInstallation extends Model
 {
@@ -31,17 +31,23 @@ class AmemberInstallation extends Model
     ];
 
     /**
-     * Get API client for this installation.
+     * API client for this installation, using its own api_url and api_key.
      */
-    public function getApiClient(): AMemberClient
+    public function getApiClient(): AmemberApiClient
     {
-        $client = AMemberClient::getInstance();
+        return new AmemberApiClient(
+            $this->api_url,
+            $this->api_key,
+            (int) config('amember-sso.api.timeout', 10),
+        );
+    }
 
-        // Set the API URL and key for this specific installation
-        // Note: You may need to create a new instance per installation
-        // if plutuss/amember-pro-laravel doesn't support multi-instance
-
-        return $client;
+    /**
+     * The aMember root URL: api_url without its trailing /api.
+     */
+    public function getRootUrl(): string
+    {
+        return preg_replace('#/api/?$#', '', rtrim($this->api_url, '/'));
     }
 
     /**
@@ -49,7 +55,7 @@ class AmemberInstallation extends Model
      */
     public function getLoginUrl(?string $redirectUrl = null): string
     {
-        $url = $this->login_url ?? rtrim($this->api_url, '/api') . '/login';
+        $url = $this->login_url ?? $this->getRootUrl() . '/login';
 
         if ($redirectUrl) {
             $url .= '?amember_redirect_url=' . urlencode($redirectUrl);
@@ -74,21 +80,24 @@ class AmemberInstallation extends Model
     }
 
     /**
-     * Verify webhook signature for this installation.
+     * Check the shared secret an aMember webhook carries in a fixed header.
+     *
+     * aMember doesn't sign webhooks, so the admin adds a header such as
+     * `X-Amember-Secret: <secret>` to the webhook in aMember. With no
+     * webhook_secret set, every request passes (the caller already matched
+     * the installation by IP).
      */
-    public function verifyWebhookSignature(string $payload, ?string $signature): bool
+    public function verifyWebhookSecret(?string $providedSecret): bool
     {
         if (!$this->webhook_secret) {
-            return true; // No secret configured
+            return true;
         }
 
-        if (!$signature) {
+        if ($providedSecret === null || $providedSecret === '') {
             return false;
         }
 
-        $calculatedSignature = hash_hmac('sha256', $payload, $this->webhook_secret);
-
-        return hash_equals($calculatedSignature, $signature);
+        return hash_equals((string) $this->webhook_secret, $providedSecret);
     }
 
     /**

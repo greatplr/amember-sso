@@ -5,20 +5,22 @@ namespace Greatplr\AmemberSso\Facades;
 use Illuminate\Support\Facades\Facade;
 
 /**
- * @method static ?array checkAccessByLogin(string $login)
- * @method static ?array checkAccessByEmail(string $email)
- * @method static ?array authenticateByLoginPass(string $login, string $password, ?string $ip = null)
+ * API methods take an optional installation last: an AmemberInstallation, its
+ * id, or null for the default configured in amember-sso.api.
+ *
+ * @method static ?array checkAccessByLogin(string $login, \Greatplr\AmemberSso\Models\AmemberInstallation|int|null $installation = null)
+ * @method static ?array checkAccessByEmail(string $email, \Greatplr\AmemberSso\Models\AmemberInstallation|int|null $installation = null)
+ * @method static ?array authenticateByLoginPass(string $login, string $password, ?string $ip = null, \Greatplr\AmemberSso\Models\AmemberInstallation|int|null $installation = null)
  * @method static string generateSsoUrl(string $login, ?string $redirectUrl = null)
- * @method static ?object loginFromAmember(string $loginOrEmail, bool $isEmail = false)
- * @method static ?array getUserByLogin(string $login)
- * @method static ?array getUserById(int $userId)
- * @method static ?array getUserAccess(string $loginOrEmail, bool $isEmail = false)
- * @method static bool hasProductAccess(string $loginOrEmail, int|array $productIds, bool $isEmail = false)
- * @method static bool hasActiveSubscription(string $loginOrEmail, bool $isEmail = false)
- * @method static array getAccessRecords(int $userId)
- * @method static void clearAccessCache(string $loginOrEmail)
- * @method static mixed amember()
- * @method static \Plutuss\AMember\AMemberClient client()
+ * @method static ?object loginFromAmember(string $loginOrEmail, bool $isEmail = false, \Greatplr\AmemberSso\Models\AmemberInstallation|int|null $installation = null)
+ * @method static ?array getUserByLogin(string $login, \Greatplr\AmemberSso\Models\AmemberInstallation|int|null $installation = null)
+ * @method static ?array getUserById(int $userId, \Greatplr\AmemberSso\Models\AmemberInstallation|int|null $installation = null)
+ * @method static ?array getUserAccess(string $loginOrEmail, bool $isEmail = false, \Greatplr\AmemberSso\Models\AmemberInstallation|int|null $installation = null)
+ * @method static bool hasProductAccess(string $loginOrEmail, int|array $productIds, bool $isEmail = false, \Greatplr\AmemberSso\Models\AmemberInstallation|int|null $installation = null)
+ * @method static bool hasActiveSubscription(string $loginOrEmail, bool $isEmail = false, \Greatplr\AmemberSso\Models\AmemberInstallation|int|null $installation = null)
+ * @method static array getAccessRecords(int $userId, \Greatplr\AmemberSso\Models\AmemberInstallation|int|null $installation = null)
+ * @method static void clearAccessCache(string $loginOrEmail, \Greatplr\AmemberSso\Models\AmemberInstallation|int|null $installation = null)
+ * @method static \Greatplr\AmemberSso\Api\AmemberApiClient client(\Greatplr\AmemberSso\Models\AmemberInstallation|int|null $installation = null)
  *
  * Product Mapping (Tier-based)
  * @method static bool hasTierAccess(string $amemberUserId, string $tier, $installationId = null)

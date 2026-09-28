@@ -6,11 +6,21 @@ return [
     | aMember API Configuration
     |--------------------------------------------------------------------------
     |
-    | This package uses plutuss/amember-pro-laravel for API communication.
-    | Configure AMEMBER_URL and AMEMBER_API_KEY in your .env file.
-    | See: config/amember.php
+    | The default aMember installation for API calls that aren't given an
+    | AmemberInstallation. `url` is aMember's API URL, i.e. the aMember root
+    | followed by /api (https://members.example.com/api). The key needs the
+    | check-access actions and the users/access/products permissions you use
+    | ticked in aMember's REST API settings.
+    |
+    | Installations stored in amember_installations use their own api_url and
+    | api_key instead.
     |
     */
+    'api' => [
+        'url' => env('AMEMBER_URL'),
+        'key' => env('AMEMBER_API_KEY'),
+        'timeout' => env('AMEMBER_API_TIMEOUT', 10), // seconds
+    ],
 
     /*
     |--------------------------------------------------------------------------
@@ -67,6 +77,12 @@ return [
         'enabled' => env('AMEMBER_WEBHOOK_ENABLED', true),
         'secret' => env('AMEMBER_WEBHOOK_SECRET'),
         'route_prefix' => env('AMEMBER_WEBHOOK_PREFIX', 'amember/webhook'),
+
+        // aMember does not sign webhooks. When an installation has a
+        // webhook_secret, the admin adds this header to the webhook in
+        // aMember ("Headers" field), e.g. `X-Amember-Secret: <secret>`, and
+        // requests without the matching value are rejected with 403.
+        'secret_header' => env('AMEMBER_WEBHOOK_SECRET_HEADER', 'X-Amember-Secret'),
 
         // Queue Configuration
         'use_queue' => env('AMEMBER_WEBHOOK_USE_QUEUE', true),

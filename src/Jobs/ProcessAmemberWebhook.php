@@ -12,6 +12,7 @@ use Greatplr\AmemberSso\Events\UserUpdated;
 use Greatplr\AmemberSso\Models\AmemberInstallation;
 use Greatplr\AmemberSso\Models\AmemberProduct;
 use Greatplr\AmemberSso\Services\AmemberSsoService;
+use Greatplr\AmemberSso\Support\UserDataSync;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -396,7 +397,7 @@ class ProcessAmemberWebhook implements ShouldQueue
 
         // Create new user
         $username = $data['username'] ?? $data['login'] ?? explode('@', $email)[0];
-        $name = $data['name'] ?? $data['name_f'] ?? trim(($data['name_f'] ?? '') . ' ' . ($data['name_l'] ?? ''));
+        $name = UserDataSync::fullName($data);
 
         $user = $userModel::create([
             'email' => $email,
@@ -488,27 +489,7 @@ class ProcessAmemberWebhook implements ShouldQueue
      */
     protected function syncUserDataFromWebhook(object $user, array $userData): void
     {
-        $syncableFields = config('amember-sso.access_control.syncable_fields', []);
-        $changed = false;
-
-        foreach ($syncableFields as $field) {
-            if (isset($userData[$field]) && $user->{$field} !== $userData[$field]) {
-                $user->{$field} = $userData[$field];
-                $changed = true;
-            }
-        }
-
-        // Handle name fields specially
-        if (in_array('name_f', $syncableFields) || in_array('name_l', $syncableFields)) {
-            $nameF = $userData['name_f'] ?? '';
-            $nameL = $userData['name_l'] ?? '';
-            $fullName = trim($nameF . ' ' . $nameL);
-
-            if ($fullName && $user->name !== $fullName) {
-                $user->name = $fullName;
-                $changed = true;
-            }
-        }
+        $changed = UserDataSync::apply($user, $userData);
 
         if ($changed) {
             $user->save();
@@ -531,11 +512,11 @@ class ProcessAmemberWebhook implements ShouldQueue
         $amemberSso = app(AmemberSsoService::class);
 
         if ($login) {
-            $amemberSso->clearAccessCache($login);
+            $amemberSso->clearAccessCache($login, $this->installation);
         }
 
         if ($email && $email !== $login) {
-            $amemberSso->clearAccessCache($email);
+            $amemberSso->clearAccessCache($email, $this->installation);
         }
     }
 }
